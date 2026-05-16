@@ -1,0 +1,7 @@
+本目录下的音效文件（xm4054.wav、xm4114.wav）来源于互联网免费音效资源，仅用于本项目学习交流目的。
+
+如涉及版权问题，请联系删除。
+
+Sound files in this directory (xm4054.wav, xm4114.wav) are sourced from free internet sound resources and are used for learning and communication purposes only.
+
+If there are any copyright concerns, please contact for removal.
