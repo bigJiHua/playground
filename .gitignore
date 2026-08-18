@@ -1,6 +1,85 @@
+# ============ 依赖 ============
 node_modules/
+
+# ============ 运行数据（不进仓库） ============
 data/
 uploads/
+messages.json
+
+# ============ 构建产物 ============
+dist/
+build/
+build_pyinstaller/
+*.spec.bak
+
+# ============ Python ============
+__pycache__/
+*.py[cod]
+python/.venv/
+python/.idea/
+
+# ============ 工具目录 ============
+.codebuddy/
+.workbuddy/
 .tmp/
 *.log
-.vscode
+.vscode/
+.idea/
+.DS_Store
+im.zip
+*.bat
+temp/
+# ============ 临时备份 ============
+public/index copy.html
+
+# ============ Android / Gradle ============
+android/ImClient/.gradle/
+android/ImClient/build/
+android/ImClient/app/build/
+android/ImClient/local.properties
+android/ImClient/.idea/
+*.apk
+
+# ============ 本地隐私文件（禁止上传） ============
+# 运行期本地数据 / 用户上传 / 聊天库
+data/
+uploads/
+messages.json
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# 密钥 / 签名 / 凭据
+*.keystore
+*.jks
+*.p12
+*.pfx
+secrets.json
+credentials.json
+*.env
+.env.*
+.env.local
+*.local
+
+# 本地配置（含 SDK 路径、设备信息等隐私）
+local.properties
+*.local.properties
+gradle.properties
+*.userPrefs
+private/
+
+# IDE / OS 隐私
+*.iml
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 打包/安装残留
+*.exe
+*.dmg
+*.AppImage
+*.zip
+*.tar.gz
+dist/
+build_pyinstaller/

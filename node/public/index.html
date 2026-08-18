@@ -112,6 +112,9 @@
       display: flex;
       flex-direction: column;
       max-width: 85%;
+      /* 关键：flex 子项默认 min-width:auto，超长无空格文本会把它撑破，
+         导致气泡超宽；置 0 后才能收缩到容器宽度并触发换行 */
+      min-width: 0;
     }
     .msg-wrapper.self { align-self: flex-end; align-items: flex-end; }
     .msg-wrapper.other { align-self: flex-start; align-items: flex-start; }
@@ -139,10 +142,13 @@
       padding: 10px 14px;
       border-radius: 18px;
       word-wrap: break-word;
+      overflow-wrap: anywhere;   /* 超长 URL/无空格串也能在任意位置断行 */
       line-height: 1.5;
       position: relative;
       font-size: 14px;
       white-space: pre-wrap;
+      max-width: 100%;
+      box-sizing: border-box;
     }
     .self .msg-bubble {
       background: #0088cc;
@@ -187,9 +193,27 @@
       display: flex;
       align-items: center;
       gap: 4px;
+      min-width: 0;
+      word-break: break-all;   /* 超长文件名自动断行 */
     }
     .file-download a:hover { text-decoration: underline; }
     .self .file-download a { color: #66b5ff; }
+
+    .img-download {
+      display: inline-block;
+      margin-top: 6px;
+      color: #0088cc;
+      text-decoration: none;
+      font-size: 13px;
+      background: rgba(0,0,0,0.04);
+      border: 1px solid rgba(0,0,0,0.08);
+      border-radius: 8px;
+      padding: 3px 10px;
+      cursor: pointer;
+    }
+    .img-download:hover { text-decoration: underline; background: rgba(0,0,0,0.08); }
+    .self .img-download { color: #66b5ff; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.25); }
+    .self .img-download:hover { background: rgba(255,255,255,0.2); }
 
     .msg-actions {
       display: flex;
@@ -299,7 +323,7 @@
       padding: 6px 12px;
       line-height: 1.6;
     }
-    #debug-log div { border-bottom: 1px solid #333; padding: 2px 0; }
+    #debug-log div { border-bottom: 1px solid #333; padding: 2px 0; color: #fff; }
     #debug-log div.error { color: #f55; }
     #debug-log div.success { color: #5f5; }
     #debug-log div.warn { color: #ff0; }
@@ -309,6 +333,7 @@
       bottom: 20px;
       right: 20px;
       width: 340px;
+      max-height: 40vh;
       background: #fff;
       border-radius: 10px;
       box-shadow: 0 6px 28px rgba(0,0,0,0.25);
@@ -326,6 +351,7 @@
     }
     #sys-notification .notif-body {
       padding: 14px 16px 12px;
+      overflow-y: auto;
     }
     #sys-notification .notif-title {
       display: flex;
@@ -484,7 +510,41 @@
       max-width: 80%;
       max-height: 80%;
       border-radius: 10px;
+      cursor: default;
     }
+    /* 图片预览关闭按钮（右上角 X），保证任何环境下都能关闭 */
+    #imagePreview .preview-close {
+      position: absolute;
+      top: 16px; right: 20px;
+      width: 40px; height: 40px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      font-size: 26px;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 1001;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #imagePreview .preview-close:hover { background: rgba(255,255,255,0.3); }
+    /* 图片下载按钮：预览大图时也能保存 */
+    #imagePreview .preview-download {
+      position: absolute;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 20px;
+      border: none;
+      border-radius: 20px;
+      background: #0088cc;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      z-index: 1001;
+    }
+    #imagePreview .preview-download:hover { background: #0077b6; }
 
     #sidebar {
       position: absolute;
@@ -543,11 +603,16 @@
     }
     #overlay.show { display: block; }
 
-    .toast {
+    /* 聊天页独立提示气泡：用唯一 id/class，避开与控制面板 .toast 的样式冲突；
+       明确 max-height + overflow，绝不铺满整页 */
+    .chat-toast {
       position: fixed;
-      top: 20px;
+      bottom: 24px;
       left: 50%;
       transform: translateX(-50%);
+      max-width: 90vw;
+      max-height: 20vh;
+      overflow: hidden;
       background: #333;
       color: white;
       padding: 8px 20px;
@@ -557,8 +622,9 @@
       opacity: 0;
       transition: opacity 0.3s;
       pointer-events: none;
+      text-align: center;
     }
-    .toast.show { opacity: 1; }
+    .chat-toast.show { opacity: 1; }
 
     #auth-overlay {
       position: absolute;
@@ -666,6 +732,29 @@
       flex-shrink: 0;
     }
     #logout-btn:hover { background: rgba(255,255,255,0.15); }
+    #clipboard-sync-btn {
+      background: none;
+      border: 1px solid rgba(255,255,255,0.5);
+      color: white;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    #clipboard-sync-btn:hover { background: rgba(255,255,255,0.15); }
+    #clipboard-sync-btn.on { background: #ffc107; color: #333; border-color: #ffc107; }
+    #reload-btn {
+      background: none;
+      border: 1px solid rgba(255,255,255,0.5);
+      color: white;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    #reload-btn:hover { background: rgba(255,255,255,0.15); }
   </style>
 </head>
 
@@ -675,6 +764,8 @@
     <div id="chat-header">
       <button id="menu-btn">&#9776;</button>
       <span>聊天室</span>
+      <button id="reload-btn" title="重新连接并刷新聊天（收不到消息时点击）">刷新</button>
+      <button id="clipboard-sync-btn" title="开启后，收到对方新消息会自动写入本机剪贴板">开启剪贴板同步</button>
       <button id="logout-btn" style="display:none">退出</button>
       <div id="status-dot"></div>
     </div>
@@ -721,6 +812,10 @@
         <button id="close-sidebar">&times;</button>
       </div>
       <div id="date-list"></div>
+      <div style="padding: 10px 16px; border-top: 1px solid #eee;">
+        <button id="test-notif-btn" style="width:100%; padding:8px; background:#e8f4fd; border:none; border-radius:8px; color:#0088cc; font-size:13px; cursor:pointer;">测试系统通知</button>
+        <button id="restart-app-btn" style="width:100%; padding:8px; margin-top:8px; background:#fff3e0; border:none; border-radius:8px; color:#e65100; font-size:13px; cursor:pointer;">重启应用</button>
+      </div>
     </div>
     <div id="overlay"></div>
 
@@ -743,16 +838,19 @@
           </div>
           <button id="auth-btn" type="submit">登录</button>
         </form>
+        <button id="sys-login-btn" style="display:none;width:100%;margin-top:10px;padding:9px;background:#e8f4fd;border:none;border-radius:8px;color:#0088cc;font-size:13px;cursor:pointer;">使用系统账号登录</button>
         <div id="auth-error"></div>
       </div>
     </div>
   </div>
 
-  <div id="imagePreview" onclick="closeImagePreview()">
+  <div id="imagePreview">
     <img id="previewImage" src="" alt="放大图片">
+    <button class="preview-close" id="previewClose" title="关闭">&times;</button>
+    <button class="preview-download" id="previewDownload" title="下载图片">⬇ 下载</button>
   </div>
 
-  <div id="toast" class="toast"></div>
+  <div id="chat-toast" class="chat-toast"></div>
 
   <div id="sys-notification">
     <div class="notif-bar" id="notif-bar"></div>
@@ -771,12 +869,22 @@
 
   <script>
     const STORAGE_KEY = 'chat_user';
+    // 安全的本地存储：在 pywebview/WebView2 等受限环境里，第三方上下文的
+    // iframe 访问 localStorage 会抛 SecurityError（Access is denied for this
+    // document），导致登录流程被 .catch 误报为"网络错误"。这里统一降级为
+    // 内存存储（会话内有效），浏览器环境则照常持久化。
+    const memStore = {};
+    const store = {
+      get(k) { try { return localStorage.getItem(k); } catch { return (k in memStore) ? memStore[k] : null; } },
+      set(k, v) { try { localStorage.setItem(k, v); } catch { memStore[k] = v; } },
+      remove(k) { try { localStorage.removeItem(k); } catch { delete memStore[k]; } }
+    };
     const messagesEl = document.getElementById('messages');
     const dateListEl = document.getElementById('date-list');
     const sidebar = document.getElementById('sidebar');
     const overlay = document.getElementById('overlay');
     const statusDot = document.getElementById('status-dot');
-    const toastEl = document.getElementById('toast');
+    const toastEl = document.getElementById('chat-toast');
     const inputEl = document.getElementById('message');
     const sendBtn = document.getElementById('send-btn');
     const authOverlay = document.getElementById('auth-overlay');
@@ -801,6 +909,9 @@
 
     let ws = null;
     let reconnectTimer = null;
+    let reconnectDelay = 1000;
+    const MAX_RECONNECT_DELAY = 15000;
+    let lastMsgTime = Date.now();
     let currentDate = null;
     let registered = false;
     let username = '';
@@ -848,6 +959,17 @@
           audioEls[name] = audio;
           audioLog('Audio 元素已创建: ' + name + ' = ' + url, 'success');
         });
+        // 额外用 AudioContext 解锁音频
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          if (ctx.state === 'suspended') {
+            ctx.resume();
+          }
+          ctx.close();
+          audioLog('AudioContext 解锁成功', 'success');
+        } catch (e) {
+          audioLog('AudioContext 解锁跳过: ' + e.message, 'warn');
+        }
         audioUnlocked = true;
         audioLog('audioUnlocked = true，音频初始化完成', 'success');
       } catch (err) {
@@ -861,6 +983,7 @@
       if (!audioUnlocked) {
         audioLog('播放被阻止：audioUnlocked=false，尝试重新初始化...', 'error');
         tryUnlockAudio();
+        setTimeout(() => playSound(type), 100);
         return;
       }
       const audio = audioEls[type];
@@ -884,14 +1007,21 @@
     }
 
     function tryUnlockAudio() {
-      audioLog('tryUnlockAudio() 被调用', 'info');
-      if (!audioUnlocked) initAudio();
+      if (audioUnlocked) return;
+      audioLog('tryUnlockAudio() 被调用', 'warn');
+      initAudio();
+      if (audioUnlocked) {
+        document.removeEventListener('click', tryUnlockAudio);
+        document.removeEventListener('touchstart', tryUnlockAudio);
+        document.removeEventListener('keydown', tryUnlockAudio);
+        audioLog('音频已解锁，全局监听已移除', 'success');
+      }
     }
 
     document.addEventListener('click', tryUnlockAudio);
     document.addEventListener('touchstart', tryUnlockAudio);
     document.addEventListener('keydown', tryUnlockAudio);
-    audioLog('音频事件监听器已注册 (click, touchstart, keydown)', 'success');
+    audioLog('等待用户首次交互以解锁音频…', 'info');
 
     document.getElementById('debug-header').addEventListener('click', () => {
       const box = document.getElementById('debug-audio');
@@ -900,13 +1030,243 @@
       toggle.textContent = box.classList.contains('open') ? '▼' : '▲';
     });
 
+    /* ===== 系统通知 ===== */
+    let swRegistration = null;
+    let swPingTimer = null;
+
+    // 注册 Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then(reg => {
+        swRegistration = reg;
+        if (reg.active) {
+          reg.active.postMessage({ type: 'clientReady' });
+          reg.active.postMessage({ type: 'ping' });
+        }
+        reg.addEventListener('updatefound', () => {
+          const newSW = reg.installing;
+          if (newSW) {
+            newSW.addEventListener('statechange', () => {
+              if (newSW.state === 'activated' && reg.active) {
+                reg.active.postMessage({ type: 'clientReady' });
+              }
+            });
+          }
+        });
+        // 每 30 秒 ping 一次，保持 SW 活跃
+        if (swPingTimer) clearInterval(swPingTimer);
+        swPingTimer = setInterval(() => {
+          if (reg.active) reg.active.postMessage({ type: 'ping' });
+        }, 30000);
+      }).catch(() => {});
+    }
+
+    // 监听 Service Worker 发来的消息（通知按钮点击后的操作）
+    let pendingCopyText = null;
+    if (navigator.serviceWorker) {
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        const data = event.data;
+        if (data.type === 'copy-text') {
+          navigator.clipboard.writeText(data.text).then(() => {
+            showToast('✅ 已复制');
+            pendingCopyText = null;
+          }).catch(() => {
+            try {
+              const ta = document.createElement('textarea');
+              ta.value = data.text;
+              ta.style.position = 'fixed';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              ta.select();
+              const ok = document.execCommand('copy');
+              document.body.removeChild(ta);
+              if (ok) {
+                showToast('📋 已复制到剪贴板');
+                pendingCopyText = null;
+                return;
+              }
+            } catch (e) { /* 忽略 */ }
+            // 最后手段：弹窗让用户手动复制
+            pendingCopyText = data.text;
+            const result = prompt('浏览器限制自动复制，请手动复制（Ctrl+C）:\n', data.text);
+            if (result !== null) showToast('已展示内容，可手动复制');
+            else showToast('已记录，回到页面后自动复制');
+          });
+        } else if (data.type === 'goto-msg') {
+          window.focus();
+          scrollToMsg(data.msgId);
+        }
+      });
+    }
+
+    // 用户回到页面时，自动执行待处理的复制
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && pendingCopyText) {
+        const text = pendingCopyText;
+        pendingCopyText = null;
+        navigator.clipboard.writeText(text).then(() => {
+          showToast('✅ 已复制');
+        }).catch(() => {
+          try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            showToast('📋 已复制到剪贴板');
+          } catch (e) { /* 忽略 */ }
+        });
+      }
+    });
+
+    // 请求通知权限
+    function requestNotificationPermission() {
+      if (!('Notification' in window)) return;
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(perm => {
+          if (perm === 'granted') {
+            showToast('通知已开启');
+          }
+        });
+      }
+    }
+
+    // 系统通知
     let notifTimer = null;
     let notifData = null;
 
-    function showSystemNotification(user, text, msgData) {
+    async function showSystemNotification(user, text, msgData) {
+      // 桌面 GUI（pywebview）内消息已在聊天列表实时可见，不需要任何弹窗/气泡通知
+      if (window.pywebview) {
+        const sn = document.getElementById('sys-notification');
+        if (sn) sn.style.display = 'none';
+        return;
+      }
+
+      notifData = msgData;
+      const displayText = text || (msgData?.type === 'image' ? '📷 图片' : (msgData?.type === 'file' ? '📎 文件' : '🔔 新消息'));
+
+      // 1) 始终显示页面内浮动通知（确保秒级可见）
+      showInBrowserNotification(user, displayText, msgData);
+
+      // 2) 同时发系统通知（无论前台/后台，Chrome/Edge 统一处理）
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+      // SW 带按钮系统通知（动态 tag + renotify）
+      if (swRegistration) {
+        try {
+          const uniqueTag = 'chat-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+          swRegistration.showNotification(user + ' 发来消息', {
+            body: displayText,
+            tag: uniqueTag,
+            renotify: true,
+            timestamp: Date.now(),
+            requireInteraction: false,
+            silent: false,
+            data: { text: displayText, msgId: msgData?.id, user },
+            actions: [
+              { action: 'copy', title: '复制消息' },
+              { action: 'goto', title: '跳转查看' }
+            ]
+          });
+        } catch (e) { /* 忽略 */ }
+      }
+
+      // 追加 new Notification()（双管齐下，Chrome/Edge 至少一个能弹）
+      try {
+        const toast = new Notification(user + ' 发来消息', {
+          body: displayText,
+          tag: 'fb-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          renotify: true,
+          timestamp: Date.now(),
+          requireInteraction: false
+        });
+        toast.onclick = () => { window.focus(); if (msgData?.id) scrollToMsg(msgData.id); toast.close(); };
+        setTimeout(() => toast.close(), 4000);
+      } catch (e) { /* 忽略 */ }
+    }
+
+    // 测试通知（正确方式：等用户离开页面后再弹）
+    let testNotifTimer = null;
+    function testNotification() {
+      if (!('Notification' in window)) { showToast('当前浏览器不支持系统通知'); return; }
+
+      if (Notification.permission === 'denied') {
+        showToast('通知已被拒绝，请在浏览器设置中开启');
+        return;
+      }
+
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(perm => {
+          if (perm === 'granted') testNotification();
+          else showToast('请允许通知权限后重试');
+        });
+        return;
+      }
+
+      // 权限已授予
+      showToast('请切换到其他窗口或最小化浏览器…');
+
+      // 清理上次测试
+      if (testNotifTimer) clearTimeout(testNotifTimer);
+
+      // 方案A：监听 visibilitychange，用户一离开页面就弹
+      const onVisible = () => {
+        if (document.hidden) {
+          document.removeEventListener('visibilitychange', onVisible);
+          testNotifTimer = null;
+          doSendTestNotification();
+        }
+      };
+      document.addEventListener('visibilitychange', onVisible);
+
+      // 方案B：5秒后如果用户还没离开，强制弹一个（此时可能已被节流，但有声音辅助）
+      testNotifTimer = setTimeout(() => {
+        document.removeEventListener('visibilitychange', onVisible);
+        testNotifTimer = null;
+        doSendTestNotification();
+        // 用户可能还在页面上，Chrome 不会弹系统通知，但会进通知中心
+        if (!document.hidden) {
+          showToast('因页面在前台，通知已进入通知中心。请最小化窗口重试');
+        }
+      }, 5000);
+    }
+
+    function doSendTestNotification() {
+      if (swRegistration) {
+        try {
+          swRegistration.showNotification('🎯 测试通知 - 聊天室', {
+            body: '弹出成功！系统通知可以正常工作了',
+            timestamp: Date.now(),
+            requireInteraction: false,
+            silent: false,
+            data: { text: '', msgId: null, user: '' },
+            actions: [
+              { action: 'copy', title: '复制消息' },
+              { action: 'goto', title: '跳转查看' }
+            ]
+          });
+        } catch (e) { /* fall through */ }
+      }
+      try {
+        const n = new Notification('🎯 测试通知 - 聊天室', {
+          body: '弹出成功！系统通知可以正常工作了',
+          timestamp: Date.now(),
+          requireInteraction: false
+        });
+        n.onclick = () => { window.focus(); n.close(); };
+        setTimeout(() => n.close(), 4000);
+      } catch (e) {
+        showToast('系统通知创建失败: ' + e.message);
+      }
+    }
+
+    function showInBrowserNotification(user, text, msgData) {
       notifData = msgData;
       document.getElementById('notif-user').textContent = user;
-      document.getElementById('notif-text').textContent = text || '[图片]';
+      document.getElementById('notif-text').textContent = text;
       const bar = document.getElementById('notif-bar');
       bar.style.transition = 'none';
       bar.style.width = '100%';
@@ -926,10 +1286,9 @@
     document.getElementById('notif-close').addEventListener('click', hideSystemNotification);
     document.getElementById('notif-copy').addEventListener('click', () => {
       const text = document.getElementById('notif-text').textContent;
-      navigator.clipboard.writeText(text).then(() => {
-        document.getElementById('notif-copy').textContent = '已复制';
-        setTimeout(() => { document.getElementById('notif-copy').textContent = '复制'; }, 1500);
-      }).catch(() => {});
+      copyText(text);
+      document.getElementById('notif-copy').textContent = '已复制';
+      setTimeout(() => { document.getElementById('notif-copy').textContent = '复制'; }, 1500);
     });
     document.getElementById('notif-goto').addEventListener('click', () => {
       hideSystemNotification();
@@ -971,18 +1330,22 @@
           if (data.ok) {
             username = data.username;
             userToken = data.token;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: username, token: userToken }));
+            store.set(STORAGE_KEY, JSON.stringify({ name: username, token: userToken }));
             authOverlay.classList.add('hidden');
             logoutBtn.style.display = 'block';
+            requestNotificationPermission();
             connectWS();
           } else {
             authError.textContent = data.reason || '操作失败';
           }
         })
-        .catch(() => {
+        .catch((err) => {
           authBtn.disabled = false;
           authBtn.textContent = authMode === 'login' ? '登录' : '注册';
-          authError.textContent = '网络错误，请重试';
+          const detail = (err && (err.name || err.message))
+            ? `（${err.name || ''}${err.message ? ': ' + err.message : ''}）`
+            : '';
+          authError.textContent = '网络错误，请确认服务已启动后重试' + detail;
         });
     }
 
@@ -992,7 +1355,7 @@
 
     function logout() {
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-      localStorage.removeItem(STORAGE_KEY);
+      store.remove(STORAGE_KEY);
       if (ws) { ws.onclose = null; ws.close(); ws = null; }
       registered = false; username = ''; userToken = '';
       messagesEl.innerHTML = ''; allMessages = [];
@@ -1009,11 +1372,99 @@
 
     logoutBtn.addEventListener('click', logout);
 
-    const saved = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; } })();
+    // ---- 剪贴板同步：开启后，收到对方的任意最新消息，自动写入本机系统剪贴板 ----
+    let clipboardSync = false;
+    function buildSyncText(data) {
+      if (!data) return '';
+      if (data.type === 'image') return '[图片] ' + (data.file_name || '');
+      if (data.type === 'file') return '[文件] ' + (data.file_name || '');
+      return data.text || '';
+    }
+    function syncToClipboard(text) {
+      if (!text) return;
+      const payload = { type: 'sync_clipboard', text: String(text) };
+      // 桌面 GUI（pywebview）：直接调用 Python API 写入系统剪贴板（Web Clipboard 在内嵌页不可用）
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.set_clipboard) {
+        try { window.pywebview.api.set_clipboard(String(text)); return; } catch (e) {}
+      }
+      // 旧 iframe 方案残留：postMessage 上送主面板，由 Python 写入系统剪贴板
+      if (window.parent && window.parent !== window) {
+        try { window.parent.postMessage(payload, '*'); return; } catch (e) {}
+      }
+      // 标准浏览器（顶层窗口）：降级使用 Web Clipboard API（需在用户手势内才可靠）
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(String(text)).catch(() => {});
+      }
+    }
+    function toggleClipboardSync() {
+      clipboardSync = !clipboardSync;
+      const btn = document.getElementById('clipboard-sync-btn');
+      if (btn) {
+        btn.classList.toggle('on', clipboardSync);
+        btn.textContent = clipboardSync ? '关闭剪贴板同步' : '开启剪贴板同步';
+      }
+      showToast(clipboardSync ? '已开启：收到对方新消息将自动复制到本机剪贴板' : '已关闭剪贴板同步');
+    }
+
+    // 内联事件兜底：把预览函数挂到全局，避免 IIFE 作用域下 onclick="closeImagePreview()" 找不到
+    window.openImagePreview = openImagePreview;
+    window.closeImagePreview = closeImagePreview;
+
+    // 桌面 GUI（pywebview）运行时，自动开启剪贴板同步（无需手动点击）
+    if (window.pywebview) {
+      clipboardSync = true;
+      const syncBtn = document.getElementById('clipboard-sync-btn');
+      if (syncBtn) {
+        syncBtn.classList.add('on');
+        syncBtn.textContent = '关闭剪贴板同步';
+      }
+    }
+    document.getElementById('clipboard-sync-btn').addEventListener('click', toggleClipboardSync);
+    // 刷新/重连：重新加载聊天页（自动重新登录并拉取历史，收不到消息时用）
+    document.getElementById('reload-btn').addEventListener('click', () => {
+      // 已登录：只重连 WebSocket + 重新拉取历史，避免整页刷新导致的白屏/状态丢失
+      if (username && userToken) {
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          try { ws.close(); } catch (e) {}
+        }
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        setInputEnabled(false);
+        connectWS();
+        // 重新请求最近历史，确保刷新后消息不缺失
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'history', limit: 200 }));
+        } else {
+          ws && (ws.onopen = () => {
+            ws.send(JSON.stringify({ type: 'register', user: username, token: userToken }));
+            ws.send(JSON.stringify({ type: 'history', limit: 200 }));
+            if (swRegistration && swRegistration.active) swRegistration.active.postMessage({ type: 'ping' });
+          });
+        }
+        showToast('正在重新连接...');
+      } else {
+        // 未登录：退回登录页重载
+        location.reload();
+      }
+    });
+
+    // 重启应用：桌面 exe 通过 pywebview 调用原生整机重启；网页版直接刷新
+    const restartBtn = document.getElementById('restart-app-btn');
+    if (restartBtn) {
+      restartBtn.addEventListener('click', () => {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.restart) {
+          window.pywebview.api.restart();
+        } else {
+          location.reload();
+        }
+      });
+    }
+
+    const saved = (() => { try { return JSON.parse(store.get(STORAGE_KEY)); } catch { return null; } })();
     if (saved && saved.name && saved.token) {
       username = saved.name; userToken = saved.token;
       authOverlay.classList.add('hidden');
       logoutBtn.style.display = 'block';
+      requestNotificationPermission();
     }
 
     function setInputEnabled(enabled) {
@@ -1022,16 +1473,50 @@
     }
     setInputEnabled(false);
 
+    // 重连调度：指数退避 + 随机抖动，避免服务端异常时疯狂重连
+    function scheduleReconnect() {
+      if (reconnectTimer) return;
+      if (!username || !userToken) return;
+      const delay = Math.min(reconnectDelay, MAX_RECONNECT_DELAY) + Math.floor(Math.random() * 1000);
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connectWS();
+      }, delay);
+      audioLog('将在此后 ' + delay + 'ms 重连', 'warn');
+    }
+
     function connectWS() {
       if (!username || !userToken) return;
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       ws = new WebSocket(`${protocol}//${location.host}`);
-      ws.onopen = () => { ws.send(JSON.stringify({ type: 'register', user: username, token: userToken })); };
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'register', user: username, token: userToken }));
+        // 唤醒 SW
+        if (swRegistration && swRegistration.active) {
+          swRegistration.active.postMessage({ type: 'ping' });
+        }
+      };
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        lastMsgTime = Date.now();
+        // 心跳保活：收到服务端 ping 立即回 pong
+        if (data.type === 'ping') { try { ws.send(JSON.stringify({ type: 'pong' })); } catch (e) {} return; }
+        if (data.type === 'pong') { lastMsgTime = Date.now(); return; }
+        if (data.type === 'error') { showToast(data.reason || '操作失败'); return; }
         if (data.type === 'registered') {
-          if (data.ok) { registered = true; statusDot.className = 'connected'; setInputEnabled(true); if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } }
-          else { showToast('身份验证失败，请重新登录'); logout(); }
+          if (data.ok) { registered = true; statusDot.className = 'connected'; setInputEnabled(true); reconnectDelay = 1000; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } }
+          else {
+            // 桌面自动登录场景：用 URL 里的 secret 重新换取 token，而不是直接登出（避免白屏）
+            const qp = new URLSearchParams(location.search);
+            if (qp.get('auto') === '1' && qp.get('secret')) {
+              showToast('身份失效，正在重新验证...');
+              doAutoLogin();
+            } else {
+              showToast('身份验证失败，请重新登录');
+              logout();
+            }
+          }
           return;
         }
         if (data.type === 'history') { renderMessages(data.messages); return; }
@@ -1072,10 +1557,12 @@
         }
         allMessages.push(data); displayMessage(data);
         if (data.user !== username) {
-          playSound('message');
-          showSystemNotification(data.user, data.text || (data.type === 'image' ? '[图片]' : '[文件]'), data);
+          try { playSound('message'); } catch (e) {}
+          try { showSystemNotification(data.user, data.text || (data.type === 'image' ? '[图片]' : '[文件]'), data); } catch (e) {}
+          if (clipboardSync) { try { syncToClipboard(buildSyncText(data)); } catch (e) {} }
         }
       };
+      ws.onerror = () => { audioLog('WebSocket 连接错误', 'error'); };
       ws.onclose = () => {
         statusDot.className = ''; registered = false; setInputEnabled(false);
         pendingMessages.forEach((p) => {
@@ -1083,9 +1570,23 @@
           if (statusEl) { statusEl.textContent = '✗'; statusEl.className = 'msg-status failed'; }
         });
         pendingMessages.clear();
-        if (username && userToken) reconnectTimer = setTimeout(connectWS, 2000);
+        if (username && userToken) scheduleReconnect();
       };
     }
+
+    // 客户端心跳：定期发送 ping，服务端回 pong 后刷新 lastMsgTime，避免看门狗误杀健康连接
+    setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) {}
+      }
+    }, 25000);
+
+    // 看门狗：若 90 秒无任何消息（含心跳），说明连接已僵死，强制关闭触发重连
+    setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN && Date.now() - lastMsgTime > 90000) {
+        try { ws.close(); } catch (e) {}
+      }
+    }, 15000);
 
     function formatTime(created_at) {
       if (!created_at) return '';
@@ -1170,13 +1671,20 @@
         img.src = msg.image_url; img.alt = '图片';
         img.onclick = () => openImagePreview(msg.image_url);
         bubble.appendChild(img);
+        // 图片下载按钮
+        const dl = document.createElement('button');
+        dl.className = 'img-download';
+        dl.textContent = '⬇ 下载';
+        dl.onclick = () => downloadFile(buildDownloadUrl(msg), msg.file_name || 'image');
+        bubble.appendChild(dl);
       } else if (msg.type === 'file') {
         const fd = document.createElement('div');
         fd.className = 'file-download';
         fd.innerHTML = '&#128206; ' + escapeHtml(msg.file_name || '文件') + ' (' + formatSize(msg.file_size) + ')';
-        const a = document.createElement('a');
-        a.href = msg.image_url; a.download = msg.file_name || 'download';
+        const a = document.createElement('button');
+        a.className = 'file-download-btn';
         a.textContent = '下载';
+        a.onclick = () => downloadFile(buildDownloadUrl(msg), msg.file_name || 'download');
         fd.appendChild(a);
         bubble.appendChild(fd);
       } else {
@@ -1221,11 +1729,43 @@
     }
 
     function copyText(text) {
-      navigator.clipboard.writeText(text).then(() => showToast('已复制')).catch(() => {
-        const ta = document.createElement('textarea'); ta.value = text;
-        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
-        showToast('已复制');
-      });
+      const s = String(text == null ? '' : text);
+      // 桌面 GUI（pywebview）：直接调用 Python API 写入系统剪贴板（内嵌页 Web Clipboard 不可用）
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.set_clipboard) {
+        try { window.pywebview.api.set_clipboard(s); showToast('已复制'); return; } catch (e) {}
+      }
+      // 旧 iframe 方案残留：postMessage 上送主面板
+      try {
+        if (window.self !== window.top) {
+          window.parent.postMessage({ type: 'sync_clipboard', text: s }, '*');
+          showToast('已复制');
+          return;
+        }
+      } catch (e) {}
+      // 标准浏览器（顶层窗口）：navigator.clipboard → execCommand 兜底
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(s).then(() => showToast('已复制')).catch(() => fallbackCopy(s));
+      } else {
+        fallbackCopy(s);
+      }
+    }
+
+    function fallbackCopy(text) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast(ok ? '已复制' : '复制失败');
+      } catch (e) {
+        const r = prompt('浏览器限制自动复制，请手动复制（Ctrl+C）：\n', text);
+        if (r !== null) showToast('已展示内容，可手动复制');
+      }
     }
 
     function formatSize(bytes) {
@@ -1233,6 +1773,13 @@
       if (bytes < 1024) return bytes + 'B';
       if (bytes < 1048576) return (bytes/1024).toFixed(1) + 'KB';
       return (bytes/1048576).toFixed(1) + 'MB';
+    }
+
+    // 构造下载链接：指向服务端 /api/download，保证以附件方式下载并保留原始文件名
+    function buildDownloadUrl(msg) {
+      const f = (msg.image_url || '').split('/').pop();
+      const name = msg.file_name || 'download';
+      return '/api/download?f=' + encodeURIComponent(f) + '&name=' + encodeURIComponent(name);
     }
 
     function sendMessage() {
@@ -1354,16 +1901,57 @@
     function openImagePreview(src) {
       document.getElementById('previewImage').src = src;
       document.getElementById('imagePreview').style.display = 'flex';
+      const dl = document.getElementById('previewDownload');
+      if (dl) dl.dataset.url = src;
     }
 
     function closeImagePreview() {
       document.getElementById('imagePreview').style.display = 'none';
     }
 
+    // 预览遮罩：点击遮罩空白处关闭；点击图片本身不关闭（停止冒泡）
+    (function bindImagePreview() {
+      const overlay = document.getElementById('imagePreview');
+      const img = document.getElementById('previewImage');
+      const closeBtn = document.getElementById('previewClose');
+      const dlBtn = document.getElementById('previewDownload');
+      if (overlay) {
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) closeImagePreview();
+        });
+      }
+      if (img) img.addEventListener('click', (e) => e.stopPropagation());
+      if (closeBtn) closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeImagePreview(); });
+      if (dlBtn) {
+        dlBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          downloadFile(dlBtn.dataset.url || img.src, 'image');
+        });
+      }
+      // ESC 关闭
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && overlay && overlay.style.display === 'flex') closeImagePreview();
+      });
+    })();
+
+    // 下载文件：网页版用 a[download]，桌面 GUI 用新窗口/导航触发下载
+    function downloadFile(url, name) {
+      if (!url) return;
+      if (window.pywebview) {
+        // 内嵌 WebView2 下 a[download] 不可靠，改用 window.open 触发服务端附件下载
+        try { window.open(url, '_blank'); } catch (e) { location.href = url; }
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = url; a.download = name || 'download';
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+
+
     function showToast(text) {
       toastEl.textContent = text;
-      toastEl.className = 'toast show';
-      setTimeout(() => { toastEl.className = 'toast'; }, 2000);
+      toastEl.className = 'chat-toast show';
+      setTimeout(() => { toastEl.className = 'chat-toast'; }, 2000);
     }
 
     inputEl.addEventListener('input', () => {
@@ -1383,6 +1971,7 @@
 
     document.getElementById('close-sidebar').addEventListener('click', closeSidebar);
     overlay.addEventListener('click', closeSidebar);
+    document.getElementById('test-notif-btn').addEventListener('click', testNotification);
 
     function closeSidebar() { sidebar.classList.remove('open'); overlay.classList.remove('show'); }
 
@@ -1409,7 +1998,68 @@
       });
     }
 
-    if (saved && saved.name && saved.token) connectWS();
+    // 内置系统账号自动登录（GUI 通过 URL 传入 auto=1&secret=...）：打开即登录，免手动输入。
+    // 抽成可复用函数：退出系统账号后，登录页的「使用系统账号登录」按钮可一键回来。
+    let autoLoginAttempts = 0;
+    const AUTO_LOGIN_MAX = 3;
+    function doAutoLogin() {
+      const qp = new URLSearchParams(location.search);
+      const secret = qp.get('secret');
+      if (qp.get('auto') !== '1' || !secret) return Promise.resolve(false);
+      // 重连前先关闭旧连接，避免多个 WebSocket 并存
+      if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+      return fetch('/api/auto_login?secret=' + encodeURIComponent(secret))
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ok) {
+            autoLoginAttempts++;
+            if (autoLoginAttempts >= AUTO_LOGIN_MAX) {
+              showToast('系统账号自动登录失败，请重启应用');
+              authOverlay.classList.remove('hidden');
+            }
+            return false;
+          }
+          autoLoginAttempts = 0;
+          username = d.username; userToken = d.token;
+          store.set(STORAGE_KEY, JSON.stringify({ name: username, token: userToken }));
+          authOverlay.classList.add('hidden');
+          logoutBtn.style.display = 'block';
+          requestNotificationPermission();
+          connectWS();
+          return true;
+        })
+        .catch(() => {
+          autoLoginAttempts++;
+          if (autoLoginAttempts >= AUTO_LOGIN_MAX) {
+            showToast('系统账号自动登录失败，请重启应用');
+            authOverlay.classList.remove('hidden');
+          }
+          return false;
+        });
+    }
+    const autoQP = new URLSearchParams(location.search);
+    if (autoQP.get('auto') === '1' && autoQP.get('secret')) {
+      const sysBtn = document.getElementById('sys-login-btn');
+      if (sysBtn) sysBtn.style.display = 'block';
+      doAutoLogin();
+    } else if (saved && saved.name && saved.token) connectWS();
+    const sysLoginBtn = document.getElementById('sys-login-btn');
+    if (sysLoginBtn) {
+      sysLoginBtn.addEventListener('click', () => {
+        sysLoginBtn.disabled = true;
+        doAutoLogin().then(ok => {
+          sysLoginBtn.disabled = false;
+          if (!ok) showToast('系统账号登录失败，请检查服务是否运行中');
+        });
+      });
+    }
+
+    // 页面加载完成时唤醒 SW
+    window.addEventListener('load', () => {
+      if (swRegistration && swRegistration.active) {
+        swRegistration.active.postMessage({ type: 'ping' });
+      }
+    });
 
     /* 搜索功能 */
     document.getElementById('menu-btn').addEventListener('dblclick', () => {

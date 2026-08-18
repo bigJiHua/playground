@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="280dp"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bubble_other"
+    android:elevation="8dp"
+    android:padding="6dp">
+
+    <!-- 标题栏：整条可拖动（关闭按钮区域除外） -->
+    <LinearLayout
+        android:id="@+id/float_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/purple_500"
+        android:paddingStart="6dp"
+        android:paddingEnd="4dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
+
+        <!-- 拖动把手 -->
+        <ImageView
+            android:id="@+id/float_grip"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:src="@drawable/ic_drag_grip"
+            android:tint="@color/white"
+            android:contentDescription="拖动" />
+
+        <TextView
+            android:id="@+id/float_title_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="@string/float_title"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/btn_float_close"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_close"
+            android:tint="@color/white"
+            android:padding="2dp"
+            android:contentDescription="关闭" />
+    </LinearLayout>
+
+    <!-- 输入框：单行 + 回车直接发送 -->
+    <EditText
+        android:id="@+id/et_float_input"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
+        android:hint="@string/float_hint"
+        android:inputType="text"
+        android:imeOptions="actionSend"
+        android:maxLines="1"
+        android:textSize="14sp"
+        android:textColor="#1A1A1A"
+        android:textColorHint="#9E9E9E"
+        android:background="@drawable/bg_input"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:layout_marginTop="6dp" />
+
+    <!-- 发送按钮（右侧） -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end"
+        android:layout_marginTop="6dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_float_send"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/float_send"
+            android:textSize="13sp" />
+    </LinearLayout>
+</LinearLayout>

@@ -4,13 +4,27 @@ const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
 const Database = require('better-sqlite3');
+const fs = require('fs');
+
+// 常用扩展名 -> MIME，用于下载时设置正确的 Content-Type
+const MIME_TYPES = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml', '.mp4': 'video/mp4', '.webm': 'video/webm',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+  '.pdf': 'application/pdf', '.txt': 'text/plain; charset=utf-8',
+  '.json': 'application/json', '.zip': 'application/zip',
+  '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+};
 
 const app = express();
 const server = require('http').createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const DATA_DIR = path.join(__dirname, 'data');
-const UPLOADS_DIR = path.join(__dirname, 'uploads');
+// 数据与上传目录固定在项目根（node/ 的上一级），Node 与 Python 桌面版共用同一份数据
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 
 if (!require('fs').existsSync(DATA_DIR)) require('fs').mkdirSync(DATA_DIR);
 if (!require('fs').existsSync(UPLOADS_DIR)) require('fs').mkdirSync(UPLOADS_DIR);
@@ -53,8 +67,18 @@ function localTimestamp() {
 function broadcastPayload(payload) {
     const data = JSON.stringify(payload);
     wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) client.send(data);
+        if (client.readyState === WebSocket.OPEN) {
+            try { client.send(data); } catch (e) { /* 忽略已半关闭的连接 */ }
+        }
     });
+}
+
+// 安全的单点发送：捕获半关闭连接抛出的异常
+function safeSend(ws, data) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(data); return true; } catch (e) { return false; }
+    }
+    return false;
 }
 
 app.use(express.json());
@@ -67,6 +91,32 @@ app.post('/upload', upload.single('file'), (req, res) => {
     const fileUrl = `/uploads/${req.file.filename}`;
     const originalName = req.file.originalname;
     res.json({ url: fileUrl, name: originalName, size: req.file.size });
+});
+
+// 下载接口：通过附件方式返回文件，保证浏览器下载而非预览/导航，并保留原始文件名与扩展名
+app.get('/api/download', (req, res) => {
+    const f = path.basename(String(req.query.f || ''));
+    const name = String(req.query.name || f || 'download');
+    if (!f) return res.status(400).json({ error: 'invalid file' });
+
+    const filePath = path.join(UPLOADS_DIR, f);
+    const safeRoot = path.resolve(UPLOADS_DIR);
+    // 严格防止路径穿越
+    if (path.resolve(filePath) !== filePath || !filePath.startsWith(safeRoot + path.sep)) {
+        return res.status(400).json({ error: 'invalid path' });
+    }
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+        return res.status(404).json({ error: 'file not found' });
+    }
+
+    const ext = path.extname(name).toLowerCase();
+    const mime = MIME_TYPES[ext] || 'application/octet-stream';
+    const asciiName = name.replace(/[^\x20-\x7E]/g, '_'); // ASCII 兜底名
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Disposition',
+        `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    res.setHeader('Cache-Control', 'no-store');
+    fs.createReadStream(filePath).pipe(res);
 });
 
 function hashPassword(password) {
@@ -127,22 +177,30 @@ function broadcastOnlineUsers() {
 
 wss.on('connection', (ws) => {
     let registeredUser = null;
+    ws.isAlive = true;
+    // 浏览器会自动对协议层 ping 回 pong，这里仅用于标记存活
+    ws.on('pong', () => { ws.isAlive = true; });
+    // 捕获连接级错误，避免未处理异常导致进程退出
+    ws.on('error', () => {});
 
     ws.on('message', (data) => {
         const msg = JSON.parse(data);
 
+        // 应用层心跳：客户端发 ping，服务端回 pong，保持连接活跃
+        if (msg.type === 'ping') {
+            safeSend(ws, JSON.stringify({ type: 'pong' }));
+            return;
+        }
+
         if (msg.type === 'register') {
             const user = db.prepare('SELECT * FROM users WHERE username = ?').get(msg.user);
             if (user && user.token === msg.token) {
-                const existing = userConnections.get(msg.user);
-                if (existing && existing !== ws && existing.readyState === WebSocket.OPEN) {
-                    existing.send(JSON.stringify({ type: 'kicked', reason: '您的账号已在其他设备登录' }));
-                    existing.close();
-                }
+                // 支持同一账号多设备同时在线（刷新/多端不再互踢）
+                if (!userConnections.has(registeredUser)) userConnections.set(registeredUser, new Set());
+                userConnections.get(registeredUser).add(ws);
 
                 registeredUser = msg.user;
                 const wasOnline = onlineUsers.has(registeredUser);
-                userConnections.set(registeredUser, ws);
                 onlineUsers.add(registeredUser);
                 ws.send(JSON.stringify({ type: 'registered', ok: true }));
                 const today = new Date();
@@ -183,16 +241,19 @@ wss.on('connection', (ws) => {
         if (msg._clientId) saved._clientId = msg._clientId;
 
         wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify(saved));
-            }
+            safeSend(client, JSON.stringify(saved));
         });
     });
 
     ws.on('close', () => {
         if (registeredUser) {
-            if (userConnections.get(registeredUser) === ws) {
-                userConnections.delete(registeredUser);
+            const socks = userConnections.get(registeredUser);
+            if (socks) {
+                socks.delete(ws);
+                if (socks.size === 0) userConnections.delete(registeredUser);
+            }
+            // 仅当该账号已无任何连接时才算离线
+            if (!userConnections.has(registeredUser)) {
                 onlineUsers.delete(registeredUser);
                 broadcastOnlineUsers();
             }
@@ -200,5 +261,37 @@ wss.on('connection', (ws) => {
     });
 });
 
-const PORT = process.env.PORT || 3000;
+// 服务端心跳：定期 ping 所有连接。浏览器自动回 pong；
+// 未在周期内回应的连接视为已死，直接 terminate，防止僵死连接堆积并触发客户端重连。
+const HEARTBEAT_INTERVAL = 25000;
+const heartbeat = setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) {
+            try { ws.terminate(); } catch (e) {}
+            return;
+        }
+        ws.isAlive = false;
+        try { ws.ping(); } catch (e) {}
+    });
+}, HEARTBEAT_INTERVAL);
+
+// 进程退出时清理定时器，避免句柄泄漏
+server.on('close', () => clearInterval(heartbeat));
+
+const PORT = process.env.PORT || 3001;
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`\n[启动失败] 端口 ${PORT} 已被占用。`);
+        console.error(`请先结束占用该端口的进程，常见命令（Windows PowerShell）：`);
+        console.error(`  Get-NetTCPConnection -LocalPort ${PORT} | Select-Object OwningProcess`);
+        console.error(`  # 记录上面的 PID，然后：`);
+        console.error(`  Stop-Process -Id <PID> -Force`);
+        console.error(`或者用 cmd： netstat -ano | findstr :${PORT}  然后  taskkill /PID <PID> /F`);
+        console.error(`若想临时换端口启动： PORT=3100 node server.js\n`);
+        process.exit(1);
+    } else {
+        console.error('[启动失败] 服务器异常：', err);
+        process.exit(1);
+    }
+});
 server.listen(PORT, '0.0.0.0', () => console.log(`服务器运行在 http://0.0.0.0:${PORT}`));

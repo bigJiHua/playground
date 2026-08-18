@@ -29,11 +29,11 @@ npm install
 # 开发模式运行（热重载）
 npm run dev
 
-# 或直接运行
-node server.js
+# 生产运行（发包）
+npm start        # 等价于 node server.js
 ```
 
-启动后访问 `http://localhost:3000` 即可。
+启动后访问 `http://localhost:3001` 即可（服务端实际端口为 **3001**，可通过 `PORT` 环境变量修改）。
 
 ## 功能特性
 
@@ -77,23 +77,97 @@ node server.js
 
 ## 项目结构
 
+按 **三大类** 划分目录：`node/`（Node JS 网页端）、`python/`（Python 桌面版）、`android/`（安卓客户端）。
+三端共用同一套 HTTP API + WebSocket 协议，前端 `node/public/` 为 Node 与 Python 桌面版共用。
+
 ```
 im/
-├── server.js              # 后端服务入口
-├── package.json           # 项目配置
-├── public/                # 前端静态文件
-│   ├── index.html         # 主页面（含全部前端逻辑）
-│   ├── manifest.json      # PWA 配置
-│   ├── icon.svg           # 应用图标
-│   └── sounds/            # 提示音效
-│       ├── xm4054.wav     # 新成员加入音效
-│       └── xm4114.wav     # 收到消息音效
-├── data/                  # 数据目录（自动创建）
-│   ├── chat.db            # SQLite 数据库
-│   └── chat.db-wal        # WAL 日志
-├── uploads/               # 上传文件目录（自动创建）
+├── node/                    # ★ Node JS 网页端
+│   ├── server.js            # 服务端（Express + WebSocket + SQLite）
+│   ├── package.json         # 依赖与脚本（npm start 启动）
+│   ├── start.bat            # Windows 一键启动
+│   └── public/              # 前端页面（index.html / sw.js / manifest.json / sounds）
+├── python/                  # ★ Python 桌面版
+│   ├── run_gui.py           # 控制中心 GUI（pywebview + 看门狗自动重启）
+│   ├── server.py            # Flask 版服务端（Node 的完整镜像 + 安全面板）
+│   ├── run.py               # 命令行启动入口
+│   ├── pack.bat             # 一键打包为 聊天室.exe（见下「一键脚本」）
+│   ├── start.bat            # 命令行启动服务端（python run.py）
+│   ├── start_gui.bat        # 启动控制中心 GUI（python run_gui.py）
+│   └── requirements.txt     # Python 依赖
+├── node/
+│   └── start.bat            # Windows 一键启动（yarn dev / npm start）
+├── android/                 # ★ 安卓客户端（Kotlin + Android Studio）
+│   └── ImClient/            # 登录/聊天/悬浮窗快速发送/图片文件收发
+├── data/                    # 运行数据（SQLite，自动创建，不入库）
+├── uploads/                 # 上传文件目录（自动创建，不入库）
+├── dist/                    # 构建产物（apk/exe，不入库）
+├── 聊天室.spec              # PyInstaller 打包配置（Python 桌面版）
 └── README.md
 ```
+
+## GitHub 发布
+
+仓库已配置 `.gitignore`（排除 node_modules / data / uploads / dist / build / Gradle 缓存 / 虚拟环境等）。克隆后按端启动：
+
+```bash
+# 1) Node JS 网页端
+cd node && npm install && npm start    # 访问 http://localhost:3001
+
+# 2) Python 桌面版
+cd python && pip install -r requirements.txt && python run_gui.py   # 或运行 pack.bat 打包 exe
+
+# 3) Android 客户端
+用 Android Studio 打开 android/ImClient 直接构建（注意首次同步需联网下载 Gradle）
+```
+
+## 一键脚本（`.bat`，已被 `.gitignore` 排除，不进仓库）
+
+仓库根目录 `.gitignore` 用 `*.bat` 规则把所有批处理脚本都屏蔽了（避免把平台相关脚本误传）。这些脚本**不会随 `git clone` 下载到本地**，如需使用请按下方内容自行在对应目录创建，或按说明操作。
+
+### Python 桌面版
+
+| 脚本 | 位置 | 作用 | 内容 |
+|------|------|------|------|
+| `start_gui.bat` | `python/` | 启动控制中心 GUI（pywebview 窗口） | `python "%~dp0run_gui.py"` |
+| `start.bat` | `python/` | 仅命令行启动服务端（无 GUI） | `python "%~dp0run.py"` |
+| `pack.bat` | `python/` | **一键打包为 `dist\聊天室.exe`** | 见下方完整脚本 |
+
+**`pack.bat`（一键打包为 exe）：**
+
+```bat
+@echo off
+setlocal
+rem 切换到项目根目录（pack.bat 位于 python/ 下，根目录为上一级）
+cd /d "%~dp0.."
+
+rem 直接调用 venv 内的 python（不依赖 activate，目录改名/移动后依然稳定）
+set VENV_PY=python\.venv\Scripts\python.exe
+if not exist "%VENV_PY%" set VENV_PY=python
+
+rem 安装依赖与打包工具
+"%VENV_PY%" -m pip install -r python\requirements.txt
+"%VENV_PY%" -m pip install pyinstaller
+
+rem 打包为单文件无控制台 exe（前端 node/public 打进 bundle 的 public）
+"%VENV_PY%" -m PyInstaller --onefile --noconsole --name "聊天室" --add-data "node/public;public" --paths "python" --hidden-import flask --hidden-import flask_sock --hidden-import webview python\run_gui.py
+
+echo Build complete. The executable is in the "dist" folder as 聊天室.exe
+endlocal
+```
+
+> 打包说明：
+> - 建议在 `python\.venv` 虚拟环境中打包（脚本会自动优先使用），避免污染系统 Python。
+> - 产物 `dist\聊天室.exe` 为**单文件**，可直接双击运行；首次启动会自动初始化数据库与系统账号。
+> - `dist/` 已被 `.gitignore` 排除，不会上传。
+
+### Node JS 网页端
+
+| 脚本 | 位置 | 作用 | 内容 |
+|------|------|------|------|
+| `start.bat` | `node/` | Windows 一键启动开发模式 | `cd /d "%~dp0" && yarn dev` |
+
+> 若没有 `yarn`，把 `start.bat` 里的 `yarn dev` 改成 `npm start` 即可。
 
 ## API 接口
 
@@ -162,4 +236,4 @@ npm run dev
 node server.js
 ```
 
-默认监听 `0.0.0.0:3000`，可通过 `PORT` 环境变量修改端口。
+默认监听 `0.0.0.0:3001`，可通过 `PORT` 环境变量修改端口。

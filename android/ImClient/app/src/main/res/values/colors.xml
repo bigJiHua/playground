@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_500">#6750A4</color>
+    <color name="purple_700">#4F378B</color>
+    <color name="purple_100">#EDE7F6</color>
+    <color name="red_500">#B00020</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <color name="bg_chat">#F2F3F5</color>
+    <color name="bubble_self">#6750A4</color>
+    <color name="bubble_other">#FFFFFF</color>
+    <color name="text_self">#FFFFFF</color>
+    <color name="text_other">#222222</color>
+    <color name="text_system">#888888</color>
+    <color name="hint">#757575</color>
+</resources>
