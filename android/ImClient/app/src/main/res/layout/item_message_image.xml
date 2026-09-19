@@ -28,7 +28,7 @@
                 android:maxHeight="240dp"
                 android:adjustViewBounds="true"
                 android:scaleType="fitCenter"
-                android:background="@color/white" />
+                android:background="@color/bg_surface" />
 
             <TextView
                 android:id="@+id/tv_caption"
@@ -51,7 +51,7 @@
                 android:text="@string/download"
                 android:textSize="13sp"
                 android:textStyle="bold"
-                android:textColor="@color/white"
+                android:textColor="@color/on_brand"
                 android:background="@drawable/bg_download_btn"
                 android:drawableStart="@drawable/ic_download"
                 android:drawablePadding="6dp"

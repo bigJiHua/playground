@@ -2,12 +2,36 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- 强制浅色主题，避免被系统深色模式改色（输入框文字/背景错配） -->
     <style name="Theme.ImClient" parent="Theme.Material3.Light.NoActionBar">
-        <item name="colorPrimary">@color/purple_500</item>
-        <item name="colorOnPrimary">@color/white</item>
-        <item name="colorPrimaryContainer">@color/purple_700</item>
-        <item name="android:statusBarColor">@color/purple_700</item>
-        <!-- 显式锁定输入相关前景色，杜绝继承到浅色主题下意外的浅色文字 -->
-        <item name="android:editTextColor">@color/black</item>
-        <item name="android:textColor">@color/black</item>
+        <!-- 品牌色：MaterialButton 填充色 / 强调色都从这里取，
+             改这一处就能带动所有未显式指定颜色的 Material 组件 -->
+        <item name="colorPrimary">@color/brand</item>
+        <item name="colorOnPrimary">@color/on_brand</item>
+        <!-- 容器色应是浅色调（旧值放的是深紫 brand_dark，语义反了） -->
+        <item name="colorPrimaryContainer">@color/brand_subtle</item>
+        <item name="colorOnPrimaryContainer">@color/brand_dark</item>
+        <item name="colorSecondary">@color/brand_dark</item>
+        <item name="colorOnSecondary">@color/on_brand</item>
+
+        <!-- 错误态走语义色：输入框报错、危险按钮统一成同一个红 -->
+        <item name="colorError">@color/status_error</item>
+        <item name="colorOnError">@color/on_brand</item>
+
+        <!-- 表面与文字：锁成灰阶，避免继承到 M3 默认那套偏紫的中性色 -->
+        <item name="colorSurface">@color/bg_surface</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+
+        <!-- 深紫状态栏必须配浅色图标：默认是深色图标，在 #4F378B 上几乎看不见 -->
+        <item name="android:statusBarColor">@color/brand_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/bg_surface</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+
+        <!-- 显式锁定文字前景色，杜绝继承到浅色主题下意外的浅色文字 -->
+        <item name="android:editTextColor">@color/text_primary</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:textColorTertiary">@color/text_tertiary</item>
+        <item name="android:textColorHint">@color/text_tertiary</item>
     </style>
 </resources>

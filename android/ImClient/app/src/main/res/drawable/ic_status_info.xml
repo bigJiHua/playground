@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 状态图标：提示信息（白色 i） -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -6,5 +7,5 @@
     android:viewportHeight="24">
     <path
         android:fillColor="@color/on_brand"
-        android:pathData="M3,18H21V16H3V18M3,13H21V11H3V13M3,6V8H21V6H3Z" />
+        android:pathData="M12,2A10,10 0 1,0 12,22A10,10 0 1,0 12,2M11,7H13V9H11V7M11,11H13V17H11V11Z" />
 </vector>

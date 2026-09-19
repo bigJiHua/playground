@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 状态提示背景：实际颜色由代码 setTint 决定（成功绿 / 错误红 / 警告黄 / 信息灰） -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="@color/bg_input" />
+    <solid android:color="@color/status_info" />
     <corners android:radius="10dp" />
 </shape>

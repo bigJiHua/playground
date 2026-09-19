@@ -1,10 +1,11 @@
 package com.example.imclient
 
-import android.graphics.Color
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.example.imclient.databinding.ItemMessageBinding
 import com.example.imclient.databinding.ItemMessageFileBinding
@@ -37,6 +38,25 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
         private const val TYPE_TEXT = 0
         private const val TYPE_IMAGE = 1
         private const val TYPE_FILE = 2
+
+        // 文件 / 图片的下载状态：按钮据此渲染。
+        // 之前按钮永远显示"下载"，点下去没有任何变化，用户不知道是没触发还是卡住了。
+        const val DL_NONE = 0        // 未下载 → 下载
+        const val DL_DOWNLOADING = 1 // 下载中 → 下载中…（禁用，防重复点击重复下载）
+        const val DL_DONE = 2        // 已完成 → 打开
+        const val DL_FAILED = 3      // 失败 → 重试
+    }
+
+    // 消息 id -> 下载状态（仅运行时，不入库）
+    private val downloadStates = mutableMapOf<Long, Int>()
+
+    fun getDownloadState(id: Long): Int = downloadStates[id] ?: DL_NONE
+
+    /** 更新下载状态，只刷新对应那一条，避免整列表重绘导致滚动跳动 */
+    fun setDownloadState(id: Long, state: Int) {
+        downloadStates[id] = state
+        val idx = items.indexOfFirst { it.id == id }
+        if (idx >= 0) notifyItemChanged(idx)
     }
 
     /**
@@ -115,12 +135,12 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
                 wrapper.layoutParams = lp
                 tv.text = m.text
                 tv.setBackgroundResource(0)
-                tv.setTextColor(Color.GRAY)
+                tv.setTextColor(colorOf(R.color.text_system))
                 tv.gravity = Gravity.CENTER
                 b.tvTime.text = ""
                 // 带本地保存路径的系统消息：点击复制路径到剪贴板
                 if (!m.fileLocalPath.isNullOrEmpty()) {
-                    tv.setTextColor(Color.parseColor("#6750A4"))
+                    tv.setTextColor(colorOf(R.color.text_link))
                     tv.setOnClickListener {
                         val ctx = itemView.context
                         val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
@@ -143,7 +163,7 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
             val sending = if (m.status == Message.STATUS_SENDING) " ⏳" else ""
             tv.text = prefix + (m.text ?: "") + sending
             tv.setBackgroundResource(if (isSelf) R.drawable.bubble_self else R.drawable.bubble_other)
-            tv.setTextColor(if (isSelf) Color.WHITE else Color.parseColor("#1A1A1A"))
+            tv.setTextColor(if (isSelf) colorOf(R.color.text_self) else colorOf(R.color.text_other))
             tv.gravity = Gravity.START
             b.tvTime.text = formatTime(m.createdAt)
         }
@@ -155,7 +175,9 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
             lp.gravity = if (isSelf) Gravity.END else Gravity.START
             b.wrapper.layoutParams = lp
             b.bubbleImage.setBackgroundResource(if (isSelf) R.drawable.bubble_self else R.drawable.bubble_other)
-            b.tvCaption.setTextColor(if (isSelf) Color.parseColor("#EDE7F6") else Color.GRAY)
+            b.tvCaption.setTextColor(
+                if (isSelf) colorOf(R.color.brand_subtle) else colorOf(R.color.text_tertiary)
+            )
             b.tvTime.text = formatTime(m.createdAt)
 
             val url = resolveUrl(m.imageUrl)
@@ -164,11 +186,33 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
             }
             b.root.setOnClickListener { url?.let { onAction?.onImageClick(it) } }
 
-            // 图片下载按钮（明确入口，区别于整条点击查看）
+            // 图片下载按钮（同样按状态渲染）
             b.btnDownload.setBackgroundResource(if (isSelf) R.drawable.bg_download_btn_self else R.drawable.bg_download_btn)
-            b.btnDownload.setTextColor(if (isSelf) Color.parseColor("#6750A4") else Color.WHITE)
-            b.btnDownload.compoundDrawables[0]?.setTint(if (isSelf) Color.parseColor("#6750A4") else Color.WHITE)
+            applyDownloadState(b.btnDownload, m.id, isSelf)
             b.btnDownload.setOnClickListener { onAction?.onFileClick(m) }
+        }
+
+        /** 按下载状态渲染按钮：文案 + 图标 + 可用态 */
+        private fun applyDownloadState(btn: TextView, msgId: Long, isSelf: Boolean) {
+            val state = getDownloadState(msgId)
+            val textRes = when (state) {
+                DL_DOWNLOADING -> R.string.downloading
+                DL_DONE -> R.string.open_file
+                DL_FAILED -> R.string.retry
+                else -> R.string.download
+            }
+            val iconRes = when (state) {
+                DL_DONE -> R.drawable.ic_file_attachment
+                DL_FAILED -> R.drawable.ic_refresh
+                else -> R.drawable.ic_download
+            }
+            btn.text = getString(textRes)
+            // 下载中禁用：背景 selector 会显示灰色，用户看得出"正在忙"，也防重复点击重复下载
+            btn.isEnabled = state != DL_DOWNLOADING
+            btn.setCompoundDrawablesWithIntrinsicBounds(iconRes, 0, 0, 0)
+            val tint = if (isSelf) colorOf(R.color.brand) else colorOf(R.color.on_brand)
+            btn.setTextColor(tint)
+            btn.compoundDrawables[0]?.setTint(tint)
         }
 
         private fun bindFile(m: Message) {
@@ -180,18 +224,23 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
             b.bubbleFile.setBackgroundResource(if (isSelf) R.drawable.bubble_self else R.drawable.bubble_other)
 
             // 图标按气泡底色换色：自己发的（紫底）用白色，别人发的用紫色
-            b.ivFileIcon.setColorFilter(if (isSelf) Color.WHITE else Color.parseColor("#6750A4"))
+            b.ivFileIcon.setColorFilter(
+                if (isSelf) colorOf(R.color.on_brand) else colorOf(R.color.brand)
+            )
             b.tvFileName.text = m.fileName ?: m.text ?: getString(R.string.file_text)
-            b.tvFileName.setTextColor(if (isSelf) Color.WHITE else Color.parseColor("#1A1A1A"))
+            b.tvFileName.setTextColor(
+                if (isSelf) colorOf(R.color.text_self) else colorOf(R.color.text_other)
+            )
             val size = m.fileSize?.let { formatSize(it) } ?: ""
             b.tvFileSize.text = size
-            b.tvFileSize.setTextColor(if (isSelf) Color.parseColor("#EDE7F6") else Color.parseColor("#757575"))
+            b.tvFileSize.setTextColor(
+                if (isSelf) colorOf(R.color.brand_subtle) else colorOf(R.color.text_tertiary)
+            )
             b.tvTime.text = formatTime(m.createdAt)
 
-            // 下载按钮（明确的下载入口，区别于整条点击）
+            // 下载按钮：按状态渲染（未下载 / 下载中 / 已完成 / 失败重试）
             b.btnDownload.setBackgroundResource(if (isSelf) R.drawable.bg_download_btn_self else R.drawable.bg_download_btn)
-            b.btnDownload.setTextColor(if (isSelf) Color.parseColor("#6750A4") else Color.WHITE)
-            b.btnDownload.compoundDrawables[0]?.setTint(if (isSelf) Color.parseColor("#6750A4") else Color.WHITE)
+            applyDownloadState(b.btnDownload, m.id, isSelf)
             b.btnDownload.setOnClickListener { onAction?.onFileClick(m) }
             // 整条点击也触发下载（更顺手）
             b.root.setOnClickListener { onAction?.onFileClick(m) }
@@ -212,6 +261,9 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
         }
 
         private fun getString(id: Int): String = itemView.context.getString(id)
+
+        /** 取色板里的颜色，避免代码里再写 #RRGGBB 字面量 */
+        private fun colorOf(id: Int): Int = ContextCompat.getColor(itemView.context, id)
 
         /**
          * 由消息的 created_at（ISO，如 2026-08-15T14:30:00）取 HH:mm。

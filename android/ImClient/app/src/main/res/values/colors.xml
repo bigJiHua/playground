@@ -1,18 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_500">#6750A4</color>
-    <color name="purple_700">#4F378B</color>
-    <color name="purple_100">#EDE7F6</color>
+    <!--
+      配色规范（参考 Material 3 / Arco Design 的分层方式）
+      约定：基础色板是唯一真源，业务一律用「语义别名」；
+      代码与布局里不要再出现 #RRGGBB 字面量，换主题只需改基础色板。
+    -->
+
+    <!-- ========== 1. 基础色板 ========== -->
+    <!-- 品牌 -->
+    <color name="brand">#6750A4</color>
+    <color name="brand_dark">#4F378B</color>
+    <color name="brand_subtle">#EDE7F6</color><!-- 紫底上的次级文字 / 浅紫底 -->
+    <color name="on_brand">#FFFFFF</color><!-- 品牌色底上的文字与图标 -->
+    <color name="on_brand_disabled">#80FFFFFF</color><!-- 紫底上的禁用态（半透明白） -->
+
+    <!-- 中性灰阶（9 档） -->
+    <color name="gray_50">#F7F8FA</color>
+    <color name="gray_100">#F2F3F5</color>
+    <color name="gray_200">#E5E6EB</color>
+    <color name="gray_300">#C9CDD4</color>
+    <color name="gray_400">#86909C</color>
+    <color name="gray_500">#6B7280</color>
+    <color name="gray_600">#4E5969</color>
+    <color name="gray_900">#1D2129</color>
+
+    <!-- 语义色：成功 / 错误 / 警告 / 信息（与桌面端提示条同一套语义） -->
+    <color name="status_success">#1F883D</color>
+    <color name="status_error">#C53030</color>
+    <color name="status_warn">#B07810</color>
+    <color name="status_info">#3C4149</color>
+
+    <!-- 纯色 -->
+    <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF000000</color>
+
+    <!-- ========== 2. 语义别名（业务只用这一层） ========== -->
+    <!-- 文字 -->
+    <color name="text_primary">@color/gray_900</color>
+    <color name="text_secondary">@color/gray_600</color>
+    <color name="text_tertiary">@color/gray_400</color>
+    <color name="text_disabled">@color/gray_300</color>
+    <color name="text_inverse">@color/white</color>
+    <color name="text_link">@color/brand</color>
+
+    <!-- 背景 / 分割线 -->
+    <color name="bg_chat">@color/gray_100</color>
+    <color name="bg_surface">@color/white</color>
+    <color name="bg_footer">@color/gray_50</color>
+    <color name="bg_input">@color/gray_100</color>
+    <color name="divider">@color/gray_200</color>
+
+    <!-- 气泡 -->
+    <color name="bubble_self">@color/brand</color>
+    <color name="bubble_other">@color/white</color>
+    <color name="text_self">@color/on_brand</color>
+    <color name="text_other">@color/text_primary</color>
+    <color name="text_system">@color/text_tertiary</color>
+    <color name="hint">@color/text_tertiary</color>
+
+    <!-- ========== 3. 兼容旧名（历史布局仍在用，逐步替换后可删） ========== -->
+    <color name="purple_500">@color/brand</color>
+    <color name="purple_700">@color/brand_dark</color>
+    <color name="purple_100">@color/brand_subtle</color>
     <color name="red_500">#B00020</color>
     <color name="teal_200">#FF03DAC5</color>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
-
-    <color name="bg_chat">#F2F3F5</color>
-    <color name="bubble_self">#6750A4</color>
-    <color name="bubble_other">#FFFFFF</color>
-    <color name="text_self">#FFFFFF</color>
-    <color name="text_other">#222222</color>
-    <color name="text_system">#888888</color>
-    <color name="hint">#757575</color>
 </resources>

@@ -1,6 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <solid android:color="#6750A4" />
-    <corners android:radius="16dp" />
-</shape>
+<!-- 下载按钮（对方消息）：正常 / 按下 / 禁用 三态。
+     之前只有一种颜色，下载中再点没有任何反馈，看起来像按钮坏了。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/gray_300" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/brand_dark" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/brand" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</selector>
