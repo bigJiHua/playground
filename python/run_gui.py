@@ -109,6 +109,45 @@ def set_clipboard(text):
 # ---------------------------------------------------------------------------
 def run_server_mode(port, secret=None):
     import server  # 在子进程内导入（源码与冻结 exe 均可用）
+
+    # 把 stdout/stderr 落盘到 data/server.log 并加时间戳。
+    # 冻结 exe 是 --noconsole，服务一旦崩溃过去完全没有痕迹，
+    # 只能靠猜；有日志后「刷新后掉线」这类问题可以直接看死因。
+    try:
+        _base = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) \
+            else os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+        _log_dir = os.path.join(_base, 'data')
+        os.makedirs(_log_dir, exist_ok=True)
+        _f = open(os.path.join(_log_dir, 'server.log'), 'a', encoding='utf-8', buffering=1)
+
+        class _Timestamped:
+            def __init__(self, f):
+                self._f = f
+
+            def write(self, data):
+                try:
+                    if not data or not data.strip():
+                        return
+                    ts = time.strftime('%Y-%m-%d %H:%M:%S')
+                    for line in data.rstrip().splitlines():
+                        self._f.write(f'[{ts}] {line}\n')
+                except Exception:
+                    pass
+
+            def flush(self):
+                try:
+                    self._f.flush()
+                except Exception:
+                    pass
+
+        sys.stdout = _Timestamped(_f)
+        sys.stderr = _Timestamped(_f)
+        # 让 Flask / werkzeug 的异常也走同一份日志
+        import logging
+        logging.basicConfig(stream=sys.stdout, level=logging.ERROR)
+    except Exception:
+        pass
+
     server.init_db()
     server.ensure_admin()
     server.ensure_system_user()
@@ -134,7 +173,9 @@ class Controller:
         self.start_time = 0
         self.auto_restart = True
         self.crash_count = 0
+        self.restart_count = 0   # 看门狗累计重启次数（面板可见，掉线不再是"莫名其妙"）
         self.watchdog_started = False
+        self.log_f = None
 
     def _build_args(self):
         if getattr(sys, 'frozen', False):
@@ -201,6 +242,7 @@ class Controller:
                     self.proc = None
                 if ar and self.crash_count < self.MAX_AUTO_RESTARTS:
                     self.crash_count += 1
+                    self.restart_count += 1
                     time.sleep(3)
                     try:
                         self._spawn()
@@ -237,6 +279,7 @@ class Controller:
             'db_mode': srv.get('db_mode') if srv else None,
             'crashed': (not alive and self.crash_count >= self.MAX_AUTO_RESTARTS),
             'port_conflict': self.port_conflict,
+            'restarts': self.restart_count,
         }
 
     def open_chat(self):
@@ -324,6 +367,18 @@ class Api:
     def refresh(self):
         return self.ctrl.status()
 
+    def restart(self):
+        """聊天页「重启应用」按钮：重启本地服务进程。
+
+        之前 Api 里没有 restart 方法，前端 `window.pywebview.api.restart`
+        取不到，会退回 `location.reload()` 硬刷整页——页面被销毁时 WebSocket
+        来不及正常关闭，服务端 handler 线程仍阻塞在 ws.receive() 上，旧连接
+        变成僵死连接挂在在线列表里，新连接又建不起来，表现为重启后假死。
+        这里改为走正规的服务重启流程。
+        """
+        r = self.ctrl.restart_server()
+        return {'ok': True, 'status': r}
+
 
 # ---------------------------------------------------------------------------
 # 控制面板 HTML（内嵌，便于打包，无需额外数据文件）
@@ -369,7 +424,7 @@ PANEL_HTML = r"""
   button.warn{background:var(--amber)}
   button.danger{background:var(--red)}
   button:disabled{opacity:.5;cursor:not-allowed}
-  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:90vw;max-height:20vh;overflow:hidden;background:#000a;padding:10px 16px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:10}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:min(520px,80vw);max-height:30vh;overflow-y:auto;background:#000d;padding:10px 16px;border-radius:10px;font-size:13px;line-height:1.5;word-break:break-word;opacity:0;transition:opacity .25s;pointer-events:none;z-index:4000}
   .toast.show{opacity:1}
   .foot{color:var(--muted);font-size:11px;margin-top:8px;text-align:center}
   .sec-title{font-size:13px;font-weight:700;margin-bottom:4px}
@@ -517,7 +572,7 @@ PANEL_HTML = r"""
       if(ov){ov.style.display='flex';ov.textContent='聊天页面加载失败：'+(e&&e.message||e);}
     }
   }
-  function update(s){if(!s)return;uiPort=s.port||uiPort;setRunning(s.running);document.getElementById('online').textContent=s.online!=null?s.online:0;if(s.running){uiUptimeBase=s.uptime||0;uiUptimeTs=Date.now();document.getElementById('uptime').textContent=fmtUptime(uiUptimeBase);document.getElementById('chatOverlay').style.display='none';loadChat();}document.getElementById('localUrl').textContent='http://127.0.0.1:'+(s.port||'—');document.getElementById('lanUrl').textContent=s.lan_url||'—';let foot='端口 '+(s.port||'—')+' · 版本 '+(s.version||'py-flask')+(s.db_mode?(' · DB:'+s.db_mode):'')+(s.crashed?' · 服务反复崩溃，请查看日志':'');if(s.port_conflict){foot+=' ⚠️ 检测到默认端口 3001 被其他服务占用，已改用 '+s.port+'；若消息收不到，请关闭其他 聊天室/服务 实例后重启本程序';}document.getElementById('foot').textContent=foot;}
+  function update(s){if(!s)return;uiPort=s.port||uiPort;setRunning(s.running);document.getElementById('online').textContent=s.online!=null?s.online:0;if(s.running){uiUptimeBase=s.uptime||0;uiUptimeTs=Date.now();document.getElementById('uptime').textContent=fmtUptime(uiUptimeBase);document.getElementById('chatOverlay').style.display='none';loadChat();}document.getElementById('localUrl').textContent='http://127.0.0.1:'+(s.port||'—');document.getElementById('lanUrl').textContent=s.lan_url||'—';let foot='端口 '+(s.port||'—')+' · 版本 '+(s.version||'py-flask')+(s.db_mode?(' · DB:'+s.db_mode):'')+(s.restarts?(' · 服务已自动重启 '+s.restarts+' 次，原因见 data/server.log'):'')+(s.crashed?' · 服务反复崩溃，请查看日志':'');if(s.port_conflict){foot+=' ⚠️ 检测到默认端口 3001 被其他服务占用，已改用 '+s.port+'；若消息收不到，请关闭其他 聊天室/服务 实例后重启本程序';}document.getElementById('foot').textContent=foot;}
   // 运行时长前端独立计时：每秒平滑增长，不再依赖刷新周期是否触发
   function tickUptime(){if(uiRunning){const elapsed=Math.floor((Date.now()-uiUptimeTs)/1000);document.getElementById('uptime').textContent=fmtUptime(uiUptimeBase+elapsed);}}
   async function refresh(){try{update(await api.get_status());}catch(e){/* 忽略瞬时读取失败 */}}

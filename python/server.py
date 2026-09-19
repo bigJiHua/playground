@@ -229,8 +229,31 @@ def upload_file():
     return jsonify({'url': url, 'name': file.filename, 'size': os.path.getsize(dest_path)})
 
 # Broadcast helper
+def _arm_socket(ws, send_timeout=5):
+    """给底层 TCP socket 设置发送超时（SO_SNDTIMEO）——这是假死修复的核心。
+
+    simple_websocket 的 send() 直接调用阻塞式 socket.send() 且没有超时。
+    一旦某个客户端不再读取数据（窗口打满 / 页面僵死），send 会永久挂起；
+    而 safe_send 是「持锁发送」，那把 socket_lock 就被永久占住，导致
+    register / broadcast / 消息入库 / /api/security/info 全部排队等锁。
+    表现就是：在线列表还是绿色的，但消息发出去没反应、点刷新后整个 IM 卡死。
+
+    设置发送超时后，最坏情况只阻塞 N 秒便抛异常并释放锁。
+    只设 SO_SNDTIMEO（不影响 receive），长连接仍可被挂起等待消息。
+    """
+    try:
+        sock = getattr(ws, 'sock', None)
+        if sock is not None:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, int(send_timeout * 1000))
+    except Exception:
+        pass
+
+
 def safe_send(ws, payload):
-    """线程安全的单点发送；返回是否成功。"""
+    """线程安全的单点发送；返回是否成功。
+
+    持锁时间受 _arm_socket 设置的发送超时约束，不会无限期占用 socket_lock。
+    """
     try:
         with socket_lock:
             ws.send(json.dumps(payload))
@@ -239,46 +262,98 @@ def safe_send(ws, payload):
         return False
 
 
-def broadcast(payload: dict):
+def _drop_dead(dead):
+    """把发送失败的连接立刻摘除并关闭。
+
+    关键：不能只是"跳过"。僵死连接只要还留在 user_sockets 里，之后**每条**
+    广播都会再对它发送一次、再卡满一次发送超时（SO_SNDTIMEO）。
+    一旦有消息堆积（比如历史回放、刷屏），整体就被拖垮——
+    这正是"点刷新后 IM 假死"的表现：HTTP 还能应答，但消息谁都发不出去。
+    """
+    if not dead:
+        return
+    with socket_lock:
+        for ws in dead:
+            for username, socks in list(user_sockets.items()):
+                if ws in socks:
+                    socks.discard(ws)
+                    if not socks:
+                        user_sockets.pop(username, None)
+                        online_users.discard(username)
+                        user_ip.pop(username, None)
+    # 强制关闭底层 socket，才能让仍阻塞在 ws.receive() 的 handler 线程真正退出
+    for ws in dead:
+        try:
+            ws.close()
+        except Exception:
+            pass
+    try:
+        broadcast({'type': 'online_users', 'users': list(online_users)}, drop_dead=False)
+    except Exception:
+        pass
+
+
+def broadcast(payload: dict, drop_dead: bool = True):
+    """广播：先快照再逐个发送（每次发送独立加锁），单个慢连接不会长时间独占锁。
+
+    快照在锁内一次性完成，发送在锁外逐个进行；发送失败的连接立即摘除，
+    避免它被后续每条广播反复重试。
+    """
     with socket_lock:
         targets = [ws for socks in user_sockets.values() for ws in socks]
+    dead = []
     for ws in targets:
-        safe_send(ws, payload)
+        if not safe_send(ws, payload):
+            dead.append(ws)
+    if drop_dead:
+        _drop_dead(dead)
 
 
 def start_heartbeat(interval=30):
     """Periodically ping every connected client so idle WebSocket connections
     stay alive and wedged ones are detected (client replies with pong).
-    发送失败的连接视为已死，立即清理并广播最新在线列表。"""
+    发送失败的连接视为已死，立即清理并广播最新在线列表。
+
+    重要：ping 发送必须在锁外进行。ws.send 是阻塞式系统调用，若某个客户端
+    不读数据（TCP 窗口打满），send 会长时间挂起；旧实现在持锁状态下发送，
+    会让 register / broadcast / /api/security/info 全部排队等待同一个锁，
+    表现为控制面板点「刷新」后整片卡住、在线列表不动。现在改为：
+    先短暂持锁做快照 → 锁外逐个发送 → 只对失败的连接重新持锁清理。
+    """
     def _loop():
         while True:
             time.sleep(interval)
+            # 1) 持锁仅做快照，耗时极短
             with socket_lock:
-                dead = []
-                for username, socks in list(user_sockets.items()):
-                    for ws in list(socks):
-                        try:
-                            ws.send(json.dumps({'type': 'ping'}))
-                        except Exception:
-                            dead.append((username, ws))
-                for username, ws in dead:
-                    socks = user_sockets.get(username)
-                    if socks:
-                        socks.discard(ws)
-                        if not socks:
-                            user_sockets.pop(username, None)
-                    online_users.discard(username)
-                    user_ip.pop(username, None)
-            if dead:
-                broadcast({'type': 'online_users', 'users': list(online_users)})
+                snapshot = [(u, w) for u, socks in user_sockets.items() for w in list(socks)]
+            if not snapshot:
+                continue
+            # 2) 锁外发送：单个连接卡住不会拖累其它连接与 HTTP 接口
+            dead = []
+            for username, ws in snapshot:
+                try:
+                    ws.send(json.dumps({'type': 'ping'}))
+                except Exception:
+                    dead.append((username, ws))
+            # 3) 只清理失败连接（复用 _drop_dead：摘除 + 强制关 socket + 广播在线列表）
+            _drop_dead([ws for _u, ws in dead])
     t = threading.Thread(target=_loop, daemon=True)
     t.start()
 
 
 # WebSocket endpoint
+# 控制类消息：仅用于连接维护 / 状态同步，绝不能当作聊天消息落库。
+# 其中 'history' 是聊天页「刷新」按钮发来的历史请求——服务端在 register
+# 成功后本就会主动推送当天历史，这条请求以前会被当成一条空气泡写进数据库
+# 并广播给所有人（聊天里出现一条空白消息），必须拦掉。
+CONTROL_MSG_TYPES = {'ping', 'pong', 'history', 'ack', 'typing', 'read', 'sync_clipboard'}
+
+
 @sock.route('/')
 def websocket_route(ws):
     registered_user = None
+    # 设置发送超时：僵死连接最多占用锁 5 秒，而不是永久（假死修复）
+    _arm_socket(ws)
     try:
         while True:
             raw = ws.receive()
@@ -289,7 +364,7 @@ def websocket_route(ws):
             except Exception:
                 continue
             # Ignore keepalive ack / stray ping echoes from the client.
-            if msg.get('type') in ('ping', 'pong'):
+            if msg.get('type') in CONTROL_MSG_TYPES:
                 continue
             # Registration
             if msg.get('type') == 'register':

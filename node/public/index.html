@@ -607,24 +607,66 @@
        明确 max-height + overflow，绝不铺满整页 */
     .chat-toast {
       position: fixed;
-      bottom: 24px;
+      /* 上移，避开控制面板自己的提示条（它在 bottom:24px），否则两者会叠在一起 */
+      bottom: 72px;
       left: 50%;
       transform: translateX(-50%);
-      max-width: 90vw;
-      max-height: 20vh;
-      overflow: hidden;
-      background: #333;
-      color: white;
-      padding: 8px 20px;
-      border-radius: 20px;
+      width: auto;
+      max-width: min(520px, 80vw);
+      /* 高度随内容自然增长：旧的 max-height:20vh + overflow:hidden 会把
+         稍长一点的提示直接拦腰截断，看着就是一块比例诡异的黑条 */
+      max-height: 30vh;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.82);
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 10px;
       font-size: 13px;
-      z-index: 2000;
+      line-height: 1.5;
+      word-break: break-word;
+      white-space: pre-wrap;
+      z-index: 3000;
       opacity: 0;
       transition: opacity 0.3s;
       pointer-events: none;
       text-align: center;
     }
     .chat-toast.show { opacity: 1; }
+
+    /* 顶部居中轻提示：刷新等操作的成功反馈，和底部 chat-toast 分工，互不遮挡 */
+    .top-toast {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-14px);
+      max-width: min(520px, 80vw);
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.5;
+      word-break: break-word;
+      z-index: 5000;
+      opacity: 0;
+      transition: opacity .25s, transform .25s, background-color .25s;
+      pointer-events: none;
+      /* 图标 + 文本一行，语义色由 .success/.error/.warn/.info 决定 */
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+    }
+    .top-toast .ic { flex: 0 0 auto; width: 16px; height: 16px; display: block; }
+    .top-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    /* 语义色：绿=成功 红=错误 黄=警告 灰=信息 */
+    .top-toast.success { background: rgba(31, 136, 61, 0.95); }
+    .top-toast.error   { background: rgba(197, 48, 48, 0.95); }
+    .top-toast.warn    { background: rgba(176, 120, 16, 0.95); }
+    .top-toast.info    { background: rgba(60, 65, 73, 0.92); }
+    /* 进行中：带一个呼吸效果，明确"还在忙" */
+    .top-toast.pending { background: rgba(60, 65, 73, 0.92); }
+    .top-toast.pending .ic { animation: topSpin 1s linear infinite; }
+    @keyframes topSpin { to { transform: rotate(360deg); } }
 
     #auth-overlay {
       position: absolute;
@@ -850,6 +892,7 @@
     <button class="preview-download" id="previewDownload" title="下载图片">⬇ 下载</button>
   </div>
 
+  <div id="top-toast" class="top-toast"></div>
   <div id="chat-toast" class="chat-toast"></div>
 
   <div id="sys-notification">
@@ -927,8 +970,6 @@
       message: '/sounds/xm4114.wav'
     };
 
-    let audioUnlocked = false;
-    const audioEls = {};
     const debugLog = [];
     const MAX_LOG = 50;
 
@@ -946,76 +987,154 @@
       el.scrollTop = el.scrollHeight;
     }
 
-    function initAudio() {
-      if (audioUnlocked) return;
-      audioLog('initAudio() 被调用，尝试初始化音频...', 'warn');
-      try {
-        Object.entries(NOTIFICATION_SOUNDS).forEach(([name, url]) => {
-          const audio = new Audio();
-          audio.preload = 'auto';
-          audio.volume = 0.5;
-          audio.src = url;
-          audio.load();
-          audioEls[name] = audio;
-          audioLog('Audio 元素已创建: ' + name + ' = ' + url, 'success');
-        });
-        // 额外用 AudioContext 解锁音频
-        try {
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          if (ctx.state === 'suspended') {
-            ctx.resume();
-          }
-          ctx.close();
-          audioLog('AudioContext 解锁成功', 'success');
-        } catch (e) {
-          audioLog('AudioContext 解锁跳过: ' + e.message, 'warn');
+    // ------------------------------------------------------------------
+    // 声音引擎
+    //
+    // 旧实现踩的两个坑，正是"声音被占用 / 被禁止"的根因：
+    // 1) initAudio() 每次都 new AudioContext() 又立刻 close()。浏览器对同时存在的
+    //    AudioContext 有数量上限（Chrome 约 6 个），反复创建会耗尽，再 new 就抛异常，
+    //    表现为"AudioContext 被占用"。
+    // 2) playSound() 用 cloneNode() 克隆元素播放。克隆出来的是全新元素，不继承
+    //    原元素的解锁状态；连续播放时后一次会打断前一次（AbortError: interrupted）。
+    //
+    // 按主流做法重写：
+    // - AudioContext 单例，创建后不再关闭，贯穿页面生命周期；
+    // - 只在真实用户手势里解锁：resume + 播一个静音 buffer 彻底激活输出，
+    //   解锁成功后再预解码，避免白费一次网络请求；
+    // - 播放用 AudioBufferSourceNode——每次新建的是轻量节点而非新上下文，
+    //   同一声音可重叠、不会互相打断；
+    // - 解码或播放失败降级到单例 HTMLAudioElement（复用同一元素，不 clone）；
+    // - 同类声音 300ms 节流，消息轰炸时不会刷爆。
+    // ------------------------------------------------------------------
+    const SoundEngine = {
+      ctx: null,
+      buffers: {},        // name -> AudioBuffer（预解码结果）
+      unlocked: false,
+      preloading: false,
+      fallbackEls: {},    // 降级用的单例 audio 元素
+      lastPlayAt: {},     // 节流时间戳
+
+      ensureCtx() {
+        if (this.ctx) return this.ctx;
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) {
+          audioLog('当前环境不支持 AudioContext，将降级到 audio 元素', 'warn');
+          return null;
         }
-        audioUnlocked = true;
-        audioLog('audioUnlocked = true，音频初始化完成', 'success');
-      } catch (err) {
-        audioLog('音频初始化失败: ' + err.message, 'error');
-        console.error('音频初始化失败', err);
+        try {
+          this.ctx = new AC();
+          audioLog('AudioContext 已创建（单例，不会关闭）', 'success');
+        } catch (e) {
+          audioLog('AudioContext 创建失败: ' + e.message, 'error');
+          return null;
+        }
+        return this.ctx;
+      },
+
+      /** 必须在用户手势（click/touchstart/keydown）中调用 */
+      async unlock() {
+        if (this.unlocked) return true;
+        const ctx = this.ensureCtx();
+        if (!ctx) { this.unlocked = true; return false; }
+        try {
+          if (ctx.state === 'suspended') await ctx.resume();
+          // 播一个 1 帧静音 buffer 彻底激活输出（部分 WebView 只 resume 不够）
+          const buf = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          src.start(0);
+          this.unlocked = true;
+          audioLog('音频已解锁（state=' + ctx.state + '）', 'success');
+          this.preload();
+          return true;
+        } catch (e) {
+          audioLog('解锁失败: ' + e.message + '（运行时将降级播放）', 'warn');
+          this.unlocked = true;   // 不再反复重试，交给降级路径
+          return false;
+        }
+      },
+
+      /** 预解码为 AudioBuffer，之后播放零解码开销 */
+      async preload() {
+        if (this.preloading || !this.ctx) return;
+        this.preloading = true;
+        for (const [name, url] of Object.entries(NOTIFICATION_SOUNDS)) {
+          if (this.buffers[name]) continue;
+          try {
+            const res = await fetch(url);
+            const arr = await res.arrayBuffer();
+            this.buffers[name] = await this.ctx.decodeAudioData(arr);
+            audioLog('已解码: ' + name, 'success');
+          } catch (e) {
+            audioLog('解码失败 ' + name + ': ' + e.message + '（将降级）', 'warn');
+          }
+        }
+        this.preloading = false;
+      },
+
+      play(name) {
+        if (!NOTIFICATION_SOUNDS[name]) return;
+        // 节流：同一声音 300ms 内只响一次
+        const now = Date.now();
+        if (now - (this.lastPlayAt[name] || 0) < 300) return;
+        this.lastPlayAt[name] = now;
+
+        const buf = this.buffers[name];
+        if (this.ctx && this.ctx.state === 'running' && buf) {
+          try {
+            const src = this.ctx.createBufferSource();
+            const gain = this.ctx.createGain();
+            gain.gain.value = 0.5;
+            src.buffer = buf;
+            src.connect(gain);
+            gain.connect(this.ctx.destination);
+            src.start(0);
+            return;
+          } catch (e) {
+            audioLog('BufferSource 播放失败: ' + e.message, 'error');
+          }
+        }
+        this.playFallback(name);
+      },
+
+      /** 降级：复用同一个 audio 元素，重置进度再播，避免 clone 互相中断 */
+      playFallback(name) {
+        try {
+          let el = this.fallbackEls[name];
+          if (!el) {
+            el = new Audio();
+            el.preload = 'auto';
+            el.src = NOTIFICATION_SOUNDS[name];
+            this.fallbackEls[name] = el;
+          }
+          el.volume = 0.5;
+          try { el.currentTime = 0; } catch (e) {}
+          const p = el.play();
+          if (p && p.catch) {
+            p.catch(err => audioLog('降级播放被拒绝: ' + err.message, 'error'));
+          }
+        } catch (e) {
+          audioLog('降级播放异常: ' + e.message, 'error');
+        }
       }
-    }
+    };
 
     function playSound(type) {
-      audioLog('playSound("' + type + '") 被调用，audioUnlocked=' + audioUnlocked + ', audioEls[type]=' + (!!audioEls[type]), 'warn');
-      if (!audioUnlocked) {
-        audioLog('播放被阻止：audioUnlocked=false，尝试重新初始化...', 'error');
-        tryUnlockAudio();
-        setTimeout(() => playSound(type), 100);
-        return;
-      }
-      const audio = audioEls[type];
-      if (!audio) {
-        audioLog('播放失败：audioEls["' + type + '"] 不存在', 'error');
-        return;
-      }
-      try {
-        const clone = audio.cloneNode();
-        clone.volume = 0.5;
-        const p = clone.play();
-        if (p && p.catch) {
-          p.catch(err => {
-            audioLog('clone.play() 被拒绝: ' + err.message, 'error');
-          });
-        }
-        audioLog('开始播放: ' + type + ' (clone.play() 已调用)', 'success');
-      } catch (err) {
-        audioLog('播放异常: ' + err.message, 'error');
-      }
+      // 未解锁时不再死循环重试（旧实现会 setTimeout 递归 100ms 一次，消息多时雪崩）；
+      // 直接交给引擎，它会在降级路径里尽力播放并把原因写进调试面板。
+      SoundEngine.play(type);
     }
 
     function tryUnlockAudio() {
-      if (audioUnlocked) return;
-      audioLog('tryUnlockAudio() 被调用', 'warn');
-      initAudio();
-      if (audioUnlocked) {
-        document.removeEventListener('click', tryUnlockAudio);
-        document.removeEventListener('touchstart', tryUnlockAudio);
-        document.removeEventListener('keydown', tryUnlockAudio);
-        audioLog('音频已解锁，全局监听已移除', 'success');
-      }
+      SoundEngine.unlock().then(ok => {
+        if (ok) {
+          document.removeEventListener('click', tryUnlockAudio);
+          document.removeEventListener('touchstart', tryUnlockAudio);
+          document.removeEventListener('keydown', tryUnlockAudio);
+          audioLog('音频解锁完成，已移除全局手势监听', 'success');
+        }
+      });
     }
 
     document.addEventListener('click', tryUnlockAudio);
@@ -1420,42 +1539,63 @@
       }
     }
     document.getElementById('clipboard-sync-btn').addEventListener('click', toggleClipboardSync);
-    // 刷新/重连：重新加载聊天页（自动重新登录并拉取历史，收不到消息时用）
+    // 刷新/重连：只重建一条 WebSocket（收不到消息时点击）
+    // 手动点刷新才进入 refreshPhase，成功后弹「刷新成功」；
+    // 自动重连不走这里，避免断网时反复弹提示。
     document.getElementById('reload-btn').addEventListener('click', () => {
-      // 已登录：只重连 WebSocket + 重新拉取历史，避免整页刷新导致的白屏/状态丢失
-      if (username && userToken) {
-        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-          try { ws.close(); } catch (e) {}
-        }
-        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-        setInputEnabled(false);
-        connectWS();
-        // 重新请求最近历史，确保刷新后消息不缺失
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'history', limit: 200 }));
-        } else {
-          ws && (ws.onopen = () => {
-            ws.send(JSON.stringify({ type: 'register', user: username, token: userToken }));
-            ws.send(JSON.stringify({ type: 'history', limit: 200 }));
-            if (swRegistration && swRegistration.active) swRegistration.active.postMessage({ type: 'ping' });
-          });
-        }
-        showToast('正在重新连接...');
-      } else {
+      if (!(username && userToken)) {
         // 未登录：退回登录页重载
         location.reload();
+        return;
       }
+      beginRefresh('正在刷新中…');
+      hardReconnect();
     });
 
-    // 重启应用：桌面 exe 通过 pywebview 调用原生整机重启；网页版直接刷新
+    function hardReconnect() {
+      // 旧实现有三个坑，这里逐一规避：
+      // 1) ws.close() 会异步触发 onclose → scheduleReconnect() 再排一个重连定时器，
+      //    与本函数同步调用的 connectWS() 形成两条连接互相竞争，而 ws 变量只指向
+      //    最后一条，前一条变成没人管的「幽灵连接」——状态点显示绿色、消息却发不出去。
+      //    解决：关闭前先摘掉所有回调，让它不再触发重连调度。
+      if (ws) {
+        try {
+          ws.onopen = null; ws.onmessage = null; ws.onclose = null; ws.onerror = null;
+          ws.close();
+        } catch (e) {}
+        ws = null;
+      }
+      // 2) 清掉可能已在排队的重连定时器，避免重复建连
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      reconnectDelay = 1000;
+      registered = false;
+      setInputEnabled(false);
+      try { statusDot.className = ''; } catch (e) {}
+      // 3) 只建一条新连接：register 由 connectWS() 的 onopen 统一发送；
+      //    历史消息由服务端在 register 成功后主动推送，客户端无需再请求
+      //    （旧的 {type:'history'} 请求会被服务端当成聊天消息写进数据库）。
+      connectWS();
+    }
+
+    // 重启应用：桌面 exe 走 pywebview 的服务重启（不再硬刷整页）；网页版才 reload
     const restartBtn = document.getElementById('restart-app-btn');
     if (restartBtn) {
       restartBtn.addEventListener('click', () => {
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.restart) {
-          window.pywebview.api.restart();
-        } else {
-          location.reload();
+        const canApi = window.pywebview && window.pywebview.api && window.pywebview.api.restart;
+        if (canApi) {
+          try {
+            beginRefresh('正在重启服务…');
+            window.pywebview.api.restart();
+          } catch (e) { location.reload(); }
+          return;
         }
+        // 网页版兜底：重载前先干净地断开 WebSocket，
+        // 否则服务端会残留一条收不到 FIN 的僵死连接
+        try {
+          if (ws) { ws.onopen = null; ws.onmessage = null; ws.onclose = null; ws.onerror = null; ws.close(); }
+        } catch (e) {}
+        ws = null;
+        location.reload();
       });
     }
 
@@ -1492,6 +1632,8 @@
       ws = new WebSocket(`${protocol}//${location.host}`);
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: 'register', user: username, token: userToken }));
+        // 手动刷新时把"连上了，正在验证"这一步显示出来，避免中间空窗看着像卡死
+        if (refreshPhase) showTopStatus('正在连接中…', 'pending', 0);
         // 唤醒 SW
         if (swRegistration && swRegistration.active) {
           swRegistration.active.postMessage({ type: 'ping' });
@@ -1505,7 +1647,12 @@
         if (data.type === 'pong') { lastMsgTime = Date.now(); return; }
         if (data.type === 'error') { showToast(data.reason || '操作失败'); return; }
         if (data.type === 'registered') {
-          if (data.ok) { registered = true; statusDot.className = 'connected'; setInputEnabled(true); reconnectDelay = 1000; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } }
+          if (data.ok) {
+            registered = true; statusDot.className = 'connected'; setInputEnabled(true); reconnectDelay = 1000;
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            // 手动点刷新后的成功反馈
+            endRefresh(true, '刷新成功', 'success');
+          }
           else {
             // 桌面自动登录场景：用 URL 里的 secret 重新换取 token，而不是直接登出（避免白屏）
             const qp = new URLSearchParams(location.search);
@@ -1570,7 +1717,10 @@
           if (statusEl) { statusEl.textContent = '✗'; statusEl.className = 'msg-status failed'; }
         });
         pendingMessages.clear();
-        if (username && userToken) scheduleReconnect();
+        if (username && userToken) {
+          if (refreshPhase) showTopStatus('连接中断，正在重连…', 'warn', 2500);
+          scheduleReconnect();
+        }
       };
     }
 
@@ -1952,6 +2102,58 @@
       toastEl.textContent = text;
       toastEl.className = 'chat-toast show';
       setTimeout(() => { toastEl.className = 'chat-toast'; }, 2000);
+    }
+
+    // 顶部居中提示：图标 + 语义色（绿=成功 红=错误 黄=警告 灰=信息 转圈=进行中）
+    const TOAST_ICONS = {
+      success: '<svg class="ic" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm3.78 5.22-4.5 4.5a.75.75 0 0 1-1.06 0L4.22 7.72a.75.75 0 1 1 1.06-1.06l1.45 1.44 3.97-3.97a.75.75 0 1 1 1.06 1.06Z"/></svg>',
+      error: '<svg class="ic" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm2.78 9.72a.75.75 0 1 1-1.06 1.06L8 9.06l-1.72 1.72a.75.75 0 1 1-1.06-1.06L6.94 8 5.22 6.28a.75.75 0 1 1 1.06-1.06L8 6.94l1.72-1.72a.75.75 0 1 1 1.06 1.06L9.06 8Z"/></svg>',
+      warn: '<svg class="ic" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm.75 3.75a.75.75 0 0 0-1.5 0v4.5a.75.75 0 0 0 1.5 0v-4.5ZM8 12.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></svg>',
+      info: '<svg class="ic" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm.75 3.5a.75.75 0 0 0-1.5 0V5a.75.75 0 0 0 1.5V3.5ZM6.5 7a.75.75 0 0 1 .75-.75h.75v3.75h.5a.75.75 0 0 1 0 1.5H7.25a.75.75 0 0 1-.75-.75V7Z"/></svg>',
+      pending: '<svg class="ic" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 0 1 8 8h-2.2A5.8 5.8 0 0 0 8 2.2V0Z"/></svg>'
+    };
+
+    let topToastTimer = null;
+
+    /** 顶部居中状态提示。kind: success/error/warn/info/pending；ms=0 表示不自动消失 */
+    function showTopStatus(text, kind = 'info', ms = 1800) {
+      const el = document.getElementById('top-toast');
+      if (!el) return;
+      el.className = 'top-toast show ' + kind;
+      el.innerHTML = TOAST_ICONS[kind] || TOAST_ICONS.info;
+      const span = document.createElement('span');
+      span.textContent = text;            // 走 textContent，杜绝 HTML 注入
+      el.appendChild(span);
+      if (topToastTimer) clearTimeout(topToastTimer);
+      if (ms > 0) {
+        topToastTimer = setTimeout(() => { el.classList.remove('show'); }, ms);
+      }
+    }
+
+    function showTopToast(text, ms) {
+      showTopStatus(text, 'info', ms == null ? 1800 : ms);
+    }
+
+    // ---- 刷新 / 重启状态机 ----
+    // 点按钮后如果界面毫无变化，用户就会以为卡死。这里把每一步都显示出来：
+    // 正在刷新中 → 正在连接中 → 连接成功 / 失败，并有超时兜底。
+    let refreshPhase = 0;      // 0 空闲，1 进行中
+    let refreshTimer = null;
+
+    function beginRefresh(label) {
+      refreshPhase = 1;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      showTopStatus(label || '正在刷新中…', 'pending', 0);
+      refreshTimer = setTimeout(() => {
+        if (refreshPhase) showTopStatus('连接超时，仍在重试…', 'warn', 2500);
+      }, 10000);
+    }
+
+    function endRefresh(ok, text, kind) {
+      if (!refreshPhase) return;
+      refreshPhase = 0;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      showTopStatus(text, kind || (ok ? 'success' : 'error'));
     }
 
     inputEl.addEventListener('input', () => {
