@@ -90,6 +90,7 @@
     <string name="install_file_missing">安装包文件不存在或为空</string>
     <string name="install_parse_failed">安装包无法解析，可能下载不完整</string>
     <string name="install_problem_title">无法安装</string>
+    <string name="install_signature_mismatch">签名不一致：手机上已装的这个包是另一把钥匙签的（比如装过 release 版、现在下的是 debug 版）。安卓不允许覆盖安装，请先卸载旧版本再装。</string>
     <string name="copy_diag">复制诊断信息</string>
     <string name="open_downloads">去下载列表手动装</string>
     <string name="open_downloads_hint">已打开下载列表，找到安装包手动点击即可安装</string>

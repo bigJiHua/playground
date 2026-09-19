@@ -702,13 +702,14 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
         val uri = systemUri ?: downloadedUris[f.absolutePath]
         // 第一步先确认安装包本身是好的。系统安装器对坏包只给"位置错误""解析包出错"
         // 这类含糊提示，根本分不清是下载不完整、文件不是 APK、还是版本/签名冲突。
-        val problem = verifyApk(f)
-        if (problem != null && uri == null) {
-            // 只有在没有系统 URI 可走时才把校验失败当成致命错误。
-            // 有 URI 时安装走 content://，不要求我们能直接用 File API 读到这个文件
-            // （Android 11+ 用路径读公共 Download 目录可能被拒，但 URI 方式照样能装），
-            // 此时提前拦截反而会误报，交给系统安装器给最终裁决更准。
-            showInstallProblem(problem, f)
+        val verdict = verifyApk(f)
+        // 结论是"文件我们读不到"时，只有在没有系统 URI 可走的情况下才算致命：
+        // 有 URI 时安装走 content://，不要求我们能直接用 File API 读到这个文件
+        // （Android 11+ 用路径读公共 Download 目录可能被拒，但 URI 方式照样能装），
+        // 此时提前拦截反而会误报，交给系统安装器给最终裁决更准。
+        // 而"降级""签名不一致"这类确定性结论，有没有 URI 都必须拦下来。
+        if (verdict.problem != null && (!verdict.fileLevelOnly || uri == null)) {
+            showInstallProblem(verdict.problem, f)
             return
         }
         if (!hasInstallPermission()) {
@@ -734,27 +735,44 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
     }
 
     /**
-     * 安装前完整性校验：返回 null 表示可以装，否则返回失败原因。
-     * 挡在这里能省掉大量"系统说位置错误，但其实文件是坏的"这类误判。
+     * 校验结论。
+     * @param problem null = 可以装；否则是给用户看的原因
+     * @param fileLevelOnly true = 只是"这个文件我们读不到/解析不了"。走 content:// 时
+     *        并不要求我们能直接用 File API 读到它（Android 11+ 用路径读公共 Download 可能被拒），
+     *        所以这类问题在有系统 URI 时不能拦截，交给安装器裁决；
+     *        而"降级""签名不一致"是确定性结论，无论如何都要拦下来。
      */
-    private fun verifyApk(f: File): String? {
-        if (!f.exists() || !f.isFile) return getString(R.string.install_file_missing)
+    private class Verdict(val problem: String?, val fileLevelOnly: Boolean) {
+        companion object {
+            fun ok() = Verdict(null, false)
+            fun fileLevel(p: String) = Verdict(p, true)
+            fun fatal(p: String) = Verdict(p, false)
+        }
+    }
+
+    /**
+     * 安装前完整性校验。挡在这里能省掉大量"系统说位置错误/未知错误，但其实文件是坏的"这类误判。
+     */
+    private fun verifyApk(f: File): Verdict {
+        if (!f.exists() || !f.isFile) return Verdict.fileLevel(getString(R.string.install_file_missing))
         val size = f.length()
-        if (size <= 0) return getString(R.string.install_file_missing)
+        if (size <= 0) return Verdict.fileLevel(getString(R.string.install_file_missing))
         // APK 本质是 zip，文件头必须是 "PK"。下载到 HTML 错误页时会在这里立刻暴露。
         try {
             FileInputStream(f).use { input ->
                 val magic = ByteArray(2)
                 val n = input.read(magic)
                 if (n != 2 || magic[0] != 'P'.code.toByte() || magic[1] != 'K'.code.toByte()) {
-                    return getString(R.string.install_bad_file, "$size 字节 / 头=${dumpHead(magic, n)}")
+                    return Verdict.fileLevel(
+                        getString(R.string.install_bad_file, "$size 字节 / 头=${dumpHead(magic, n)}")
+                    )
                 }
             }
         } catch (e: Exception) {
-            return getString(R.string.install_bad_file, e.message ?: "读取失败")
+            return Verdict.fileLevel(getString(R.string.install_bad_file, e.message ?: "读取失败"))
         }
-        val info = readArchiveInfo(f) ?: return getString(R.string.install_parse_failed)
-        val pkg = info.packageName ?: return null
+        val info = readArchiveInfo(f) ?: return Verdict.fileLevel(getString(R.string.install_parse_failed))
+        val pkg = info.packageName ?: return Verdict.ok()
         val installed = try {
             @Suppress("DEPRECATION")
             packageManager.getPackageInfo(pkg, 0)
@@ -763,10 +781,48 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
         }
         // 降级安装系统一律拒绝，但报错极不直观，这里提前说清楚
         if (installed != null && versionCodeOf(info) < versionCodeOf(installed)) {
-            return "无法降级安装：待装 ${versionCodeOf(info)}，已装 ${versionCodeOf(installed)}"
+            return Verdict.fatal("无法降级安装：待装 ${versionCodeOf(info)}，已装 ${versionCodeOf(installed)}")
         }
-        return null
+        // 签名不一致（已装的是 release 包、现在装的是 debug 包，或反之）也是覆盖安装的硬拒条件。
+        // 系统对这种情况给的正是"未知错误 / 应用未安装"这类无信息量提示，一直没被识别出来，
+        // 所以在这里提前明确告知，别再让用户以为是权限问题。
+        if (installed != null && signatureMismatch(info, installed)) {
+            return Verdict.fatal(getString(R.string.install_signature_mismatch))
+        }
+        return Verdict.ok()
     }
+
+    /** 待装包与已装包的签名证书是否完全不相交。取不到签名时保守返回 false（不拦） */
+    private fun signatureMismatch(pending: PackageInfo, installed: PackageInfo): Boolean {
+        val a = sigFingerprints(pending)
+        val b = sigFingerprints(installed)
+        if (a.isEmpty() || b.isEmpty()) return false
+        return a.none { it in b }
+    }
+
+    /** 取包里所有签名证书的 SHA-256，尽量兼容新旧两套 API */
+    @Suppress("DEPRECATION")
+    private fun sigFingerprints(p: PackageInfo): Set<String> {
+        val out = mutableSetOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                p.signingInfo?.let { si ->
+                    si.apkContentsSigners?.forEach { out += sha256(it.toByteArray()) }
+                    si.signingCertificateHistory?.forEach { out += sha256(it.toByteArray()) }
+                }
+            } catch (_: Exception) { }
+        }
+        if (out.isEmpty()) {
+            try {
+                p.signatures?.forEach { out += sha256(it.toByteArray()) }
+            } catch (_: Exception) { }
+        }
+        return out
+    }
+
+    private fun sha256(b: ByteArray): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(b)
+            .joinToString("") { "%02x".format(it) }
 
     private fun dumpHead(magic: ByteArray, n: Int): String {
         if (n <= 0) return "(空)"
@@ -804,6 +860,8 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
             append("文件：").append(f.absolutePath).append("\n")
             append("大小：").append(if (f.exists()) f.length() else -1).append(" 字节\n")
             append("权限：").append(if (hasInstallPermission()) "已开启" else "未开启").append("\n")
+            // 候选数为 0 说明是 Android 11+ 包可见性过滤挡住了查询（只影响查询、不影响真实跳转）
+            append("安装器候选：").append(installerCandidateCount()).append(" 个\n")
             append("设备：").append(Build.MANUFACTURER).append(" ").append(Build.MODEL)
             append(" / Android ").append(Build.VERSION.RELEASE)
             append(" (API ").append(Build.VERSION.SDK_INT).append(")")
@@ -843,6 +901,16 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
         } catch (e: Exception) {
             StatusToast.show(this, e.message ?: "", StatusToast.ERROR)
         }
+    }
+
+    /** 诊断用：系统里能处理 APK 的 Activity 有几个。0 = 包可见性把查询挡了；-1 = 查询本身抛异常 */
+    private fun installerCandidateCount(): Int = try {
+        packageManager.queryIntentActivities(
+            Intent(Intent.ACTION_VIEW).apply { type = "application/vnd.android.package-archive" },
+            PackageManager.MATCH_DEFAULT_ONLY
+        ).size
+    } catch (_: Exception) {
+        -1
     }
 
     private fun hasInstallPermission(): Boolean {
@@ -954,14 +1022,23 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
                 setDataAndType(uri, mime)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            val targets = packageManager.queryIntentActivities(i, PackageManager.MATCH_DEFAULT_ONLY)
-            if (targets.isEmpty()) return "未找到可处理的应用"
             // Android 11+ 光加 FLAG 不够，需逐个显式授权，否则目标安装器读到的 content:// 是空的
+            val targets = try {
+                packageManager.queryIntentActivities(i, PackageManager.MATCH_DEFAULT_ONLY)
+            } catch (_: Exception) {
+                emptyList()
+            }
             targets.forEach { ri ->
                 try {
                     grantUriPermission(ri.activityInfo.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 } catch (e: Exception) { }
             }
+            // 关键：**不要因为查询为空就提前放弃**。
+            // Android 11+ 的包可见性过滤只作用于 PackageManager 的查询结果，
+            // 并不影响系统对 Intent 的真正解析——也就是说"查不到"≠"装不了"。
+            // 之前这里 `if (targets.isEmpty()) return` 会在某些 ROM 上直接放弃安装器路径，
+            // 表现就是点了安装毫无反应，于是误判成"没权限"，正好对上"App 内装不了、
+            // 文件管理器里点却能装"的现象。现在一律真的发起一次，由系统给最终结果。
             startActivity(i)
             null
         } catch (e: Exception) {
