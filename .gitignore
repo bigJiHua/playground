@@ -10,6 +10,9 @@ messages.json
 dist/
 build/
 build_pyinstaller/
+build_old_*/
+# PyInstaller 自动生成的 spec 含本机绝对路径，不适合进仓库
+*.spec
 *.spec.bak
 
 # ============ Python ============
