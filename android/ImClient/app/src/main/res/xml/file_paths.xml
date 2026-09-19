@@ -1,6 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- 应用私有 cache/files（普通文件下载） -->
     <cache-path
-        name="downloads"
+        name="cache_files"
         path="files/" />
+
+    <!-- 公开 Download：APK 走系统 DownloadManager 存到 Download/ImClient，
+         安装器必须能从这里读到。缺这条 getUriForFile 会抛 IllegalArgumentException，
+         旧代码因此退回 Uri.fromFile —— 而 targetSdk>=24 时跨应用传 file://
+         会抛 FileUriExposedException，安装直接失败（MIUI 上表现为点了没反应）。 -->
+    <external-path
+        name="public_download"
+        path="Download/" />
+
+    <!-- 应用私有外部存储 Download/ImClient（未拿到存储权限时 APK 的落点） -->
+    <external-files-path
+        name="private_download"
+        path="Download/" />
+    <external-files-path
+        name="external_files"
+        path="." />
+
+    <!-- 兜底 -->
+    <external-cache-path
+        name="external_cache"
+        path="." />
+    <files-path
+        name="app_files"
+        path="." />
 </paths>

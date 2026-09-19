@@ -30,6 +30,9 @@
     <string name="conn_offline">未连接</string>
     <string name="path_copied">路径已复制</string>
     <string name="download">下载</string>
+    <string name="downloading">下载中…</string>
+    <string name="open_file">打开</string>
+    <string name="retry">重试</string>
     <string name="storage_ready">已获得存储权限，下载的文件可在文件管理器 Download/ImClient 找到</string>
     <string name="storage_denied">未授予存储权限，文件将保存在应用私有目录（文件管理器可能看不到）</string>
     <string name="storage_grant_hint">如需保存到公开 Download，请在设置页开启「所有文件访问」权限后重试下载</string>
@@ -39,6 +42,15 @@
     <string name="service_channel_desc">保持聊天长连接并在后台运行</string>
     <string name="service_notif_title">IM 正在后台运行</string>
     <string name="service_notif_text">点击返回聊天</string>
+    <!-- 消息通知渠道：IMPORTANCE_HIGH，会弹横幅并响铃 -->
+    <string name="msg_channel_name">新消息提醒</string>
+    <string name="msg_channel_desc">收到聊天消息时弹出提醒并播放提示音</string>
+    <string name="notif_body_image">[图片] %1$s</string>
+    <string name="notif_body_file">[文件] %1$s</string>
+    <string name="notif_multi_title">%1$d 条新消息</string>
+    <!-- Android 13+ 通知权限 -->
+    <string name="notif_perm_title">需要通知权限</string>
+    <string name="notif_perm_guide">开启后，收到新消息时才能弹出系统提醒。Android 13 以上必须授权。</string>
     <string name="ip_hint">已检测到本机 IP：%1$s。请把末段改成服务器的 IP 末段（服务器在电脑上时填电脑的）</string>
     <string name="input_hint">说点什么…</string>
     <string name="float_permission_missing">未获得悬浮窗权限，无法显示悬浮窗。请在系统设置中开启「显示在其他应用上层」</string>
@@ -54,6 +66,9 @@
     <string name="attach_image">发送图片</string>
     <string name="attach_file">发送文件</string>
     <string name="refresh">刷新</string>
+    <string name="refresh_loading">正在刷新中…</string>
+    <string name="refresh_success">刷新成功</string>
+    <string name="refresh_failed">刷新失败，请检查网络</string>
     <string name="chat_history">聊天记录</string>
     <string name="history_loading">加载中…</string>
     <string name="history_empty">该日期没有聊天记录</string>
@@ -63,6 +78,19 @@
     <string name="history_realtime">已返回实时聊天</string>
     <string name="uploading">上传中…</string>
     <string name="upload_fail">上传失败：%1$s</string>
-    <string name="install_perm_guide">安装 APK 需要「安装未知应用」权限，请在设置中为本应用开启后重试</string>
+    <string name="install_perm_title">需要「安装未知应用」权限</string>
+    <string name="install_perm_guide">安卓 8.0 以上要求单独授权才能安装 APK。\n请在接下来的页面中找到本应用，打开「允许安装未知应用 / 安装未知应用」后返回，会自动继续安装。\n\n小米 MIUI / HyperOS：设置 → 应用设置 → 应用管理 → 本应用 → 权限管理 → 安装未知应用\nOPPO ColorOS：设置 → 应用 → 应用管理 → 本应用 → 应用权限 → 安装未知应用</string>
+    <string name="go_settings">去设置</string>
     <string name="no_installer">未找到可用的安装程序</string>
+    <string name="install_success">安装完成</string>
+    <string name="install_failed">安装失败：%1$s</string>
+    <string name="install_failed_with_code">安装失败：%1$s (code=%2$d)</string>
+    <string name="install_diag_copied">诊断信息已复制，可粘贴给开发者</string>
+    <string name="install_bad_file">下载到的不是有效安装包（%1$s），请重新下载后再装</string>
+    <string name="install_file_missing">安装包文件不存在或为空</string>
+    <string name="install_parse_failed">安装包无法解析，可能下载不完整</string>
+    <string name="install_problem_title">无法安装</string>
+    <string name="copy_diag">复制诊断信息</string>
+    <string name="open_downloads">去下载列表手动装</string>
+    <string name="open_downloads_hint">已打开下载列表，找到安装包手动点击即可安装</string>
 </resources>

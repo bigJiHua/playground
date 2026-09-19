@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Android 13+ 前台服务通知 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 通知震动需要：没有它 enableVibration(true) 静默失效 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 安装聊天里收到的 APK 安装包（Android 8+ 需要） -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 把下载的文件存到公开 Download/ImClient（文件管理器根目录可见，Android 11+ 需要此权限） -->
@@ -49,6 +51,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- 接收 APK 安装结果（PackageInstaller 会话提交回调）。
+             PendingIntent 是本应用创建的、由本应用身份发出，所以不需要对外暴露。 -->
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false" />
+
         <!-- 文件分享（点击文件消息后用系统应用打开） -->
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -61,5 +69,20 @@
         </provider>
 
     </application>
+
+    <!-- Android 11(API 30)+ 包可见性：不声明这些 intent，queryIntentActivities /
+         resolveActivity 查不到系统安装器（返回空/null），代码会误判成"没有安装权限"
+         或"未找到安装程序"，MIUI / ColorOS 上表现为点了安装毫无反应。
+         这是 targetSdk 30+ 的硬性要求，必须列出来才能把 APK 交给安装器。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.INSTALL_PACKAGE" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
 
 </manifest>
