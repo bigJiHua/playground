@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="280dp"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -20,14 +21,18 @@
         android:paddingTop="6dp"
         android:paddingBottom="6dp">
 
-        <!-- 拖动把手 -->
-        <ImageView
+        <!-- 拖动把手。
+             这里必须用 AppCompatImageView + app:tint，不能只用 android:tint：
+             浮窗是 Service 侧用 ContextThemeWrapper + LayoutInflater 直接 inflate 的，
+             没有 AppCompatActivity 的视图工厂，平台 ImageView 根本不认 app:tint，
+             换成 app:tint 会让图标着色静默失效（图标变黑）。 -->
+        <androidx.appcompat.widget.AppCompatImageView
             android:id="@+id/float_grip"
             android:layout_width="20dp"
             android:layout_height="20dp"
             android:src="@drawable/ic_drag_grip"
-            android:tint="@color/on_brand"
-            android:contentDescription="拖动" />
+            app:tint="@color/on_brand"
+            android:contentDescription="@string/float_drag" />
 
         <TextView
             android:id="@+id/float_title_text"
@@ -40,14 +45,14 @@
             android:textSize="13sp"
             android:textStyle="bold" />
 
-        <ImageView
+        <androidx.appcompat.widget.AppCompatImageView
             android:id="@+id/btn_float_close"
             android:layout_width="24dp"
             android:layout_height="24dp"
             android:src="@drawable/ic_close"
-            android:tint="@color/on_brand"
+            app:tint="@color/on_brand"
             android:padding="2dp"
-            android:contentDescription="关闭" />
+            android:contentDescription="@string/float_close" />
     </LinearLayout>
 
     <!-- 输入区：输入框与发送按钮同行（原来是上下两行，白占一整行高度）。

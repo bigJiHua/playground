@@ -28,7 +28,8 @@
                 android:maxHeight="240dp"
                 android:adjustViewBounds="true"
                 android:scaleType="fitCenter"
-                android:background="@color/bg_surface" />
+                android:background="@color/bg_surface"
+                android:contentDescription="@string/msg_image_desc" />
 
             <TextView
                 android:id="@+id/tv_caption"

@@ -16,6 +16,8 @@
     <string name="float_title">快速发送</string>
     <string name="float_hint">输入消息，点右侧发送…</string>
     <string name="float_send">发送</string>
+    <string name="float_drag">拖动悬浮窗</string>
+    <string name="float_close">关闭悬浮窗</string>
     <string name="float_permission_guide">需要「显示在其他应用上层」权限才能开启悬浮窗。请在设置中开启后返回。</string>
     <string name="float_on">悬浮窗：开</string>
     <string name="float_off">悬浮窗：关</string>
@@ -64,6 +66,7 @@
     <string name="file_text">[文件]</string>
     <string name="image_text">[图片]</string>
     <string name="msg_click_hint">点击查看</string>
+    <string name="msg_image_desc">聊天图片</string>
     <string name="attach">附件</string>
     <string name="attach_image">发送图片</string>
     <string name="attach_file">发送文件</string>
