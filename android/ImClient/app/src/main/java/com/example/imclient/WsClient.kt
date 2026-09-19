@@ -30,6 +30,9 @@ object WsClient {
 
     interface Listener {
         fun onStatusChanged(connected: Boolean) {}
+        /** 正在建连。断线后每 3 秒重试一次，没有这个回调界面上就是红灯干等，
+         *  用户完全不知道程序是在重连还是已经放弃。 */
+        fun onConnecting() {}
         fun onMessage(message: Message) {}
         fun onHistory(messages: List<Message>) {}
         fun onOnlineUsers(users: List<String>) {}
@@ -38,6 +41,11 @@ object WsClient {
 
     @Volatile
     var isConnected: Boolean = false
+        private set
+
+    /** 是否正在建连（含断线重连的重试）。与 isConnected 互斥，用于界面显示中间态 */
+    @Volatile
+    var isConnecting: Boolean = false
         private set
 
     private val listeners = Collections.newSetFromMap(WeakHashMap<Listener, Boolean>())
@@ -58,6 +66,7 @@ object WsClient {
     private var cachedMessages: List<Message> = emptyList()
     private var cachedOnline: List<String> = emptyList()
     private var cachedConnected: Boolean = false
+    private var cachedConnecting: Boolean = false
 
     // clientId -> 乐观消息（发送中），收到回显后移除
     private val pending = mutableMapOf<String, Message>()
@@ -70,6 +79,8 @@ object WsClient {
         mainHandler.post {
             if (cachedMessages.isNotEmpty()) l.onHistory(ArrayList(cachedMessages))
             if (cachedOnline.isNotEmpty()) l.onOnlineUsers(cachedOnline)
+            // 先补中间态再补终态：后加入的界面才能正确显示"正在连接中…"
+            if (cachedConnecting) l.onConnecting()
             l.onStatusChanged(cachedConnected)
         }
     }
@@ -97,6 +108,7 @@ object WsClient {
         webSocket = null
         client = null
         isConnected = false
+        isConnecting = false
         // 清空缓存，避免下次登录串号/残留旧消息
         cachedMessages = emptyList()
         cachedOnline = emptyList()
@@ -104,15 +116,22 @@ object WsClient {
     }
 
     private fun connect() {
+        // 进入"正在连接中"：从首次启动到断线重连的每次重试都会走这里
+        isConnecting = true
+        cachedConnecting = true
+        dispatch { l -> l.onConnecting() }
+
         client = OkHttpClient.Builder()
             .pingInterval(20, TimeUnit.SECONDS) // 协议层心跳，自动回 pong
             .build()
 
         val request = Request.Builder().url(baseWsUrl).build()
         webSocket = client!!.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(ws: WebSocket, response: Response) {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
                 isConnected = true
+                isConnecting = false
                 cachedConnected = true
+                cachedConnecting = false
                 dispatch { l -> l.onStatusChanged(true) }
                 // 应用层鉴权
                 val reg = JSONObject().apply {
@@ -120,23 +139,28 @@ object WsClient {
                     put("user", currentUser)
                     put("token", currentToken)
                 }.toString()
-                ws.send(reg)
+                webSocket.send(reg)
             }
 
-            override fun onMessage(ws: WebSocket, text: String) {
+            override fun onMessage(webSocket: WebSocket, text: String) {
                 handle(text)
             }
 
-            override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 isConnected = false
+                isConnecting = false
                 cachedConnected = false
+                cachedConnecting = false
                 dispatch { l -> l.onStatusChanged(false) }
+                // 3 秒后 connect() 会再次置为"正在连接中"，界面不会一直停在"未连接"
                 scheduleReconnect()
             }
 
-            override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 isConnected = false
+                isConnecting = false
                 cachedConnected = false
+                cachedConnecting = false
                 dispatch { l -> l.onStatusChanged(false) }
                 scheduleReconnect()
             }

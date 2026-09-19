@@ -28,6 +28,8 @@
     <string name="room_public">公共聊天室（回到实时）</string>
     <string name="conn_online">已连接</string>
     <string name="conn_offline">未连接</string>
+    <string name="conn_connecting">正在连接中…</string>
+    <string name="conn_success">连接成功</string>
     <string name="path_copied">路径已复制</string>
     <string name="download">下载</string>
     <string name="downloading">下载中…</string>

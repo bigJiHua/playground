@@ -46,6 +46,11 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
     // 待安装的 APK：用户去设置开权限后返回时自动继续，免得再点一次
     private var pendingInstallApk: File? = null
 
+    // 连接中间态跟踪：wasConnecting 记录"这次连上是刚从正在连接中恢复过来的吗"，
+    // 用于决定要不要弹「连接成功」；配合节流避免网络抖动时弹窗刷屏。
+    private var wasConnecting = false
+    private var lastConnSuccessToastAt = 0L
+
     // 安装界面"是否真的被拉起"的检测：
     // startActivity 返回成功只代表系统接了单，部分 ROM 会静默丢弃这次跳转，
     // 用户看到的就是"点了毫无反应"，而代码这边以为一切正常。
@@ -79,6 +84,9 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
          * 又不至于让用户盯着空白等太久。
          */
         const val INSTALL_LAUNCH_TIMEOUT_MS = 2000L
+
+        /** 「连接成功」提示的最小间隔：网络抖动会反复上下线，不节流就是弹窗刷屏 */
+        const val CONN_TOAST_THROTTLE_MS = 10_000L
     }
 
     // 申请「显示在其他应用上层」权限后回调
@@ -1104,13 +1112,37 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
 
     // ---------- WsClient.Listener ----------
 
+    /**
+     * 正在建连（含断线后每 3 秒一次的重试）。
+     * 之前只有"已连接/未连接"两态，重连的空窗期界面上是红灯干等，
+     * 用户分不清程序是在重连还是已经放弃——这正是"正在连接中"要表达的中间态。
+     */
+    override fun onConnecting() {
+        wasConnecting = true
+        binding.dotConn.setBackgroundResource(R.drawable.dot_yellow)
+        binding.tvConn.text = getString(R.string.conn_offline)
+        binding.tvStatus.text = getString(R.string.conn_connecting)
+        binding.tvStatus.visibility = View.VISIBLE
+    }
+
     override fun onStatusChanged(connected: Boolean) {
         // 顶栏红/绿灯连接状态
         binding.dotConn.setBackgroundResource(if (connected) R.drawable.dot_green else R.drawable.dot_red)
         binding.tvConn.text = if (connected) getString(R.string.conn_online) else getString(R.string.conn_offline)
         if (connected) {
             binding.tvStatus.visibility = android.view.View.GONE
+            // 从"正在连接中"恢复过来，值得明确告知一次。
+            // 但网络抖动时会反复上下线，所以加 10 秒节流，避免弹窗刷屏。
+            val now = System.currentTimeMillis()
+            if (wasConnecting && now - lastConnSuccessToastAt > CONN_TOAST_THROTTLE_MS) {
+                lastConnSuccessToastAt = now
+                showTopToast(getString(R.string.conn_success), StatusToast.SUCCESS)
+            }
+        } else {
+            // 尚未开始重试的短暂空档，保持"未连接"但不覆盖"正在连接中"
+            binding.tvStatus.visibility = View.GONE
         }
+        wasConnecting = false
     }
 
     override fun onMessage(message: Message) {
@@ -1131,6 +1163,9 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
         // APP 不再展示在线列表，仅更新连接灯（已连接）
         binding.dotConn.setBackgroundResource(R.drawable.dot_green)
         binding.tvConn.text = getString(R.string.conn_online)
+        // 收到在线列表说明链路彻底通了，清掉"正在连接中"
+        binding.tvStatus.visibility = View.GONE
+        wasConnecting = false
     }
 
     override fun onKicked(reason: String) {
