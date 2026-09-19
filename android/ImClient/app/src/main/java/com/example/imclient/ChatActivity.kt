@@ -14,6 +14,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.view.View
@@ -44,6 +46,15 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
     // 待安装的 APK：用户去设置开权限后返回时自动继续，免得再点一次
     private var pendingInstallApk: File? = null
 
+    // 安装界面"是否真的被拉起"的检测：
+    // startActivity 返回成功只代表系统接了单，部分 ROM 会静默丢弃这次跳转，
+    // 用户看到的就是"点了毫无反应"，而代码这边以为一切正常。
+    // 记下发起时刻，若超时后仍未离开本页（onPause 未触发），就判定为没拉起来。
+    private var installLaunchAt = 0L
+    private var installLaunchApk: File? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val installLaunchWatch = Runnable { checkInstallLaunched() }
+
     // 已成功下载的文件名 -> 绝对路径。APK 由 DownloadManager 落到公开目录，
     // 普通文件在私有目录，靠目录规则反推容易找错（会导致每次点都重新下载），
     // 所以下载成功时直接记下真实路径。
@@ -61,6 +72,13 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
          */
         @Volatile
         var isForeground = false
+
+        /**
+         * 判定"安装界面没被拉起"的等待时长。
+         * 取 2 秒：够覆盖安装器冷启动（MIUI 上偶有 0.5~1s 的解析停顿），
+         * 又不至于让用户盯着空白等太久。
+         */
+        const val INSTALL_LAUNCH_TIMEOUT_MS = 2000L
     }
 
     // 申请「显示在其他应用上层」权限后回调
@@ -287,6 +305,10 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
 
     override fun onPause() {
         isForeground = false
+        // 本页被遮挡 = 安装界面确实起来了，撤掉"没拉起"的判定。
+        // 放在这里而不是 onResume，是为了覆盖"用户秒退回"的情况：
+        // 只要离开过一次就说明跳转生效了，回来再快也不该误报。
+        installLaunchAt = 0L
         WsClient.removeListener(this)
         super.onPause()
     }
@@ -722,7 +744,10 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
         // 文件管理器走的就是 ACTION_VIEW 安装器 Intent，而会话方式在这台设备上
         // 会被直接拒绝——所以先走与系统完全一致的那条路，会话只作兜底。
         val e1 = installViaInstallerIntent(f, uri)
-        if (e1 == null) return
+        if (e1 == null) {
+            watchInstallLaunch(f)
+            return
+        }
         val e2 = installViaPackageInstaller(f)
         if (e2 == null) return
         if (!hasInstallPermission()) {
@@ -732,6 +757,26 @@ class ChatActivity : AppCompatActivity(), WsClient.Listener {
             // 权限已开却还是装不了 —— 不能再去误导用户开权限，直接给出真实原因
             showInstallProblem("安装器方式：$e1\n会话方式：$e2", f)
         }
+    }
+
+    /**
+     * 发起跳转后挂一个延时复查：startActivity 成功 ≠ 安装界面真的出来了。
+     * 部分 ROM 会静默丢弃这次跳转（包可见性、安装监控、后台启动限制都可能），
+     * 这时用户看到的就是"点了没反应"，而代码这边已经当成成功返回了。
+     */
+    private fun watchInstallLaunch(f: File) {
+        mainHandler.removeCallbacks(installLaunchWatch)
+        installLaunchApk = f
+        installLaunchAt = System.currentTimeMillis()
+        mainHandler.postDelayed(installLaunchWatch, INSTALL_LAUNCH_TIMEOUT_MS)
+    }
+
+    private fun checkInstallLaunched() {
+        // installLaunchAt 为 0 表示期间触发过 onPause —— 确实跳走了，正常
+        if (installLaunchAt == 0L || isFinishing) return
+        installLaunchAt = 0L
+        val f = installLaunchApk ?: return
+        showInstallProblem(getString(R.string.install_not_launched), f)
     }
 
     /**
