@@ -93,7 +93,7 @@ class InstallResultReceiver : BroadcastReceiver() {
             val text = buildString {
                 append("IM 安装诊断\n")
                 append("status=").append(status).append(" (").append(statusName(status)).append(")\n")
-                append("message=").append(message ?: "(空)\n")
+                append("message=").append(message ?: "(空)").append("\n")
                 append("device=").append(Build.MANUFACTURER).append(" ")
                 append(Build.MODEL).append(" / Android ").append(Build.VERSION.RELEASE)
                 append(" (API ").append(Build.VERSION.SDK_INT).append(")\n")
@@ -147,8 +147,15 @@ class InstallResultReceiver : BroadcastReceiver() {
                 setDataAndType(uri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            val targets = context.packageManager.queryIntentActivities(i, 0)
-            if (targets.isEmpty()) return false
+            // 查询只用于授权：Android 11+ 的包可见性过滤只影响 PackageManager 查询结果，
+            // 不影响系统对 Intent 的解析，"查不到"不等于"装不了"。
+            // 所以这里不能因为 targets 为空就 return false —— 那会让兜底形同虚设，
+            // 与 ChatActivity 里那处同样的问题是一个坑。
+            val targets = try {
+                context.packageManager.queryIntentActivities(i, 0)
+            } catch (_: Exception) {
+                emptyList()
+            }
             targets.forEach { ri ->
                 try {
                     context.grantUriPermission(
